@@ -49,6 +49,10 @@ interface ApexState {
   severEdge: (edgeId: string) => void;
   resetSeveredEdges: () => void;
 
+  // Tarski axiom filter
+  axiomLevelFilter: "all" | 0 | 1 | 2;
+  setAxiomLevelFilter: (f: "all" | 0 | 1 | 2) => void;
+
   // Copilot
   copilotMessages: CopilotMessage[];
   addCopilotMessage: (msg: CopilotMessage) => void;
@@ -104,6 +108,10 @@ export const useApexStore = create<ApexState>((set) => ({
     }),
   resetSeveredEdges: () =>
     set((s) => ({ severedEdges: [], scissorsMode: false, graphData: s.initialGraph })),
+
+  // Tarski axiom filter
+  axiomLevelFilter: "all",
+  setAxiomLevelFilter: (f) => set({ axiomLevelFilter: f }),
 
   // Copilot
   copilotMessages: [

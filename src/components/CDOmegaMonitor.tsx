@@ -1,14 +1,16 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { OmegaState } from "@/lib/types";
+import { OmegaState, DoomsdayState, AlertLevel } from "@/lib/types";
 import { getStatusColor } from "@/lib/omega-engine";
 
 interface CDOmegaMonitorProps {
   state: OmegaState;
+  doomsday: DoomsdayState;
+  alertLevel: AlertLevel;
 }
 
-export default function CDOmegaMonitor({ state }: CDOmegaMonitorProps) {
+export default function CDOmegaMonitor({ state, doomsday, alertLevel }: CDOmegaMonitorProps) {
   const color = getStatusColor(state.status);
   const segments = 40;
   const filledSegments = Math.round((state.buffer / 100) * segments);
@@ -117,6 +119,37 @@ export default function CDOmegaMonitor({ state }: CDOmegaMonitorProps) {
         </span>
         <span className="text-[9px] text-text-muted tracking-wider">
           SHOCKS
+        </span>
+      </div>
+
+      {/* Alert Level + Mini Doomsday */}
+      <div className="flex flex-col items-center gap-0.5">
+        <div className="flex items-center gap-1.5">
+          <div
+            className="h-2.5 w-2.5 rounded-full"
+            style={{
+              backgroundColor:
+                alertLevel === "RED" ? "#ff1744" : alertLevel === "AMBER" ? "#ffab00" : "#00e676",
+              boxShadow: alertLevel === "RED" ? "0 0 6px #ff1744" : "none",
+            }}
+          />
+          <span
+            className="text-[9px] font-mono font-bold tracking-wider"
+            style={{
+              color: alertLevel === "RED" ? "#ff1744" : alertLevel === "AMBER" ? "#ffab00" : "#00e676",
+            }}
+          >
+            {alertLevel}
+          </span>
+        </div>
+        <span
+          className="text-[9px] font-mono tabular-nums"
+          style={{ color: doomsday.timeToFailureDays < 30 ? "#ff1744" : "var(--text-muted)" }}
+        >
+          T-{doomsday.timeToFailureDays}d
+        </span>
+        <span className="text-[7px] font-mono text-text-muted">
+          {doomsday.regimeType.replace("_", " ")}
         </span>
       </div>
     </div>

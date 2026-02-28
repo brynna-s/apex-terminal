@@ -137,6 +137,59 @@ export interface RiskPropagationCard {
 export type ViewMode = "2d" | "3d";
 export type TruthFilter = "raw" | "verified";
 
+// ─── Regime & Doomsday ──────────────────────────────────────────
+export type RegimeType = "STABLE" | "MELT_UP" | "CRASH" | "PHASE_TRANSITION" | "STAGNATION";
+
+export interface DoomsdayState {
+  timeToFailureDays: number;
+  dragonKingDetected: boolean;
+  dragonKingProbability: number; // 0-1
+  regimeType: RegimeType;
+  fragilityIndex: number; // 0-100
+  lpplsOscFreq: number;
+  lpplsTc: number; // critical time estimate
+  singularityScore: number;
+}
+
+// ─── Alert Level ────────────────────────────────────────────────
+export type AlertLevel = "GREEN" | "AMBER" | "RED";
+
+// ─── Tarski Axioms ──────────────────────────────────────────────
+export interface TarskiAxiom {
+  id: string;
+  level: 0 | 1 | 2;
+  name: string;
+  formalNotation: string;
+  description: string;
+}
+
+export interface ProofTrace {
+  edgeId: string;
+  violatedAxioms: string[];
+  verdict: "REJECTED" | "FLAGGED" | "TIMEOUT";
+  solverUsed: "Z3" | "cvc5";
+  checkTimeMs: number;
+}
+
+// ─── Pearl Counterfactuals ──────────────────────────────────────
+export interface CounterfactualResult {
+  interventionNode: string;
+  expectedUtility: number;
+  regretBound: number;
+  policyRecommendation: string;
+  affectedNodes: { nodeId: string; deltaOmega: number }[];
+  method: "DeepCFR" | "BackdoorAdjustment";
+}
+
+// ─── Spirtes Cascade ────────────────────────────────────────────
+export interface CascadeAnalysis {
+  lambdaMax: number;
+  isStable: boolean;
+  topCentralityNodes: { nodeId: string; label: string; centrality: number }[];
+  forgettingRate: number;
+  dampingCoeff: number;
+}
+
 // ─── Legacy DAG (for 2D fallback) ───────────────────────────────
 export interface DAGNode {
   id: string;

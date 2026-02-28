@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useApexStore } from "@/stores/useApexStore";
-import { computeOmegaState } from "@/lib/omega-engine";
+import { computeOmegaState, computeDoomsdayState, computeAlertLevel } from "@/lib/omega-engine";
 import CDOmegaMonitor from "./CDOmegaMonitor";
 import { ModuleId } from "@/lib/types";
 
@@ -16,6 +16,8 @@ const MODULE_TABS: { id: ModuleId; label: string; icon: string; color: string }[
 export default function HeaderBar() {
   const { activeModule, setActiveModule, shocks } = useApexStore();
   const state = useMemo(() => computeOmegaState(shocks), [shocks]);
+  const doomsday = useMemo(() => computeDoomsdayState(shocks, state.buffer), [shocks, state.buffer]);
+  const alertLevel = useMemo(() => computeAlertLevel(state.status, doomsday), [state.status, doomsday]);
 
   return (
     <header className="flex items-center justify-between px-6 h-14 border-b border-border bg-surface-elevated relative scanlines">
@@ -57,7 +59,7 @@ export default function HeaderBar() {
       </div>
 
       {/* Center: CDΩ Monitor */}
-      <CDOmegaMonitor state={state} />
+      <CDOmegaMonitor state={state} doomsday={doomsday} alertLevel={alertLevel} />
 
       {/* Right: Meta */}
       <div className="flex items-center gap-4">
