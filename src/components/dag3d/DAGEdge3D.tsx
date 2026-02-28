@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Billboard, Text } from "@react-three/drei";
 import * as THREE from "three";
 import { CausalEdge } from "@/lib/types";
 
@@ -11,10 +12,18 @@ interface DAGEdge3DProps {
   isHighlighted: boolean;
   isDimmed: boolean;
   isVerifiedInconsistent: boolean;
+  isCrossDomain: boolean;
+  isConnectedToSelected: boolean;
+  anyNodeSelected: boolean;
+  isSevered?: boolean;
+  isConsequenceEdge?: boolean;
+  scissorsMode?: boolean;
+  onScissorsClick?: () => void;
 }
 
-function getEdgeColor(edge: CausalEdge, isVerifiedInconsistent: boolean): string {
+function getEdgeColor(edge: CausalEdge, isVerifiedInconsistent: boolean, isCrossDomain: boolean): string {
   if (isVerifiedInconsistent) return "#ff1744";
+  if (isCrossDomain) return "#e040fb";
   switch (edge.type) {
     case "directed": return "#00e5ff";
     case "temporal": return "#ffab00";
@@ -30,10 +39,20 @@ export default function DAGEdge3D({
   isHighlighted,
   isDimmed,
   isVerifiedInconsistent,
+  isCrossDomain,
+  isConnectedToSelected,
+  anyNodeSelected,
+  isSevered = false,
+  isConsequenceEdge = false,
+  scissorsMode = false,
+  onScissorsClick,
 }: DAGEdge3DProps) {
-  const color = getEdgeColor(edge, isVerifiedInconsistent);
+  const [hovered, setHovered] = useState(false);
+  const baseColor = getEdgeColor(edge, isVerifiedInconsistent, isCrossDomain);
+  const color = isSevered ? "#ff1744" : isConsequenceEdge ? "#ff6d00" : baseColor;
+  const lineWidth = 0.5 + edge.weight * 1.5;
 
-  const { points, arrowPosition, arrowRotation } = useMemo(() => {
+  const { points, arrowPosition, arrowRotation, midpoint } = useMemo(() => {
     const src = new THREE.Vector3(...sourcePos);
     const tgt = new THREE.Vector3(...targetPos);
     const mid = new THREE.Vector3().lerpVectors(src, tgt, 0.5);
@@ -55,10 +74,13 @@ export default function DAGEdge3D({
     quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent.normalize());
     const euler = new THREE.Euler().setFromQuaternion(quaternion);
 
+    const midPt = curve.getPoint(0.5);
+
     return {
       points: pts,
       arrowPosition: arrowPos,
       arrowRotation: euler,
+      midpoint: midPt,
     };
   }, [sourcePos, targetPos]);
 
@@ -67,22 +89,41 @@ export default function DAGEdge3D({
     return geometry;
   }, [points]);
 
-  const dashSize = edge.type === "confounded" || isVerifiedInconsistent ? 0.5 : 0;
-  const gapSize = edge.type === "confounded" || isVerifiedInconsistent ? 0.3 : 0;
+  const useDashed = isSevered || edge.type === "confounded" || isVerifiedInconsistent || isCrossDomain;
+  const dashSize = useDashed ? (isSevered ? 0.6 : isCrossDomain ? 0.8 : 0.5) : 0;
+  const gapSize = useDashed ? (isSevered ? 0.4 : isCrossDomain ? 0.4 : 0.3) : 0;
+
+  // Selection-aware opacity: dim non-connected edges when a node is selected
+  const selectionDim = anyNodeSelected && !isConnectedToSelected;
+  const baseOpacity = isSevered ? 0.25 : isDimmed ? 0.15 : isHighlighted ? 0.9 : hovered ? 0.8 : isConsequenceEdge ? 0.85 : 0.5;
+  const lineOpacity = selectionDim ? 0.05 : isConnectedToSelected ? 1.0 : baseOpacity;
+  const arrowBaseOpacity = isSevered ? 0 : isDimmed ? 0.15 : 0.7;
+  const arrowOpacity = selectionDim ? 0.05 : isConnectedToSelected ? 1.0 : arrowBaseOpacity;
 
   return (
     <group>
+      {/* Invisible wider hitbox for hover + scissors click */}
+      <mesh
+        position={[midpoint.x, midpoint.y, midpoint.z]}
+        onPointerOver={() => setHovered(true)}
+        onPointerOut={() => setHovered(false)}
+        onClick={scissorsMode && onScissorsClick && !isSevered ? onScissorsClick : undefined}
+      >
+        <sphereGeometry args={[scissorsMode ? 3.5 : 2, 8, 8]} />
+        <meshBasicMaterial transparent opacity={0} />
+      </mesh>
+
       {/* Edge line */}
-      {dashSize > 0 ? (
+      {useDashed ? (
         <line>
           <bufferGeometry attach="geometry" {...lineGeometry} />
           <lineDashedMaterial
             color={color}
             transparent
-            opacity={isDimmed ? 0.15 : isHighlighted ? 0.9 : 0.5}
+            opacity={lineOpacity}
             dashSize={dashSize}
             gapSize={gapSize}
-            linewidth={1}
+            linewidth={lineWidth}
           />
         </line>
       ) : (
@@ -91,22 +132,49 @@ export default function DAGEdge3D({
           <lineBasicMaterial
             color={color}
             transparent
-            opacity={isDimmed ? 0.15 : isHighlighted ? 0.9 : 0.5}
-            linewidth={1}
+            opacity={lineOpacity}
+            linewidth={lineWidth}
           />
         </line>
       )}
 
       {/* Arrowhead */}
       <mesh position={arrowPosition} rotation={arrowRotation}>
-        <coneGeometry args={[0.2, 0.6, 6]} />
+        <coneGeometry args={[0.2 + edge.weight * 0.15, 0.6, 6]} />
         <meshBasicMaterial
           color={color}
           transparent
-          opacity={isDimmed ? 0.15 : 0.7}
+          opacity={arrowOpacity}
         />
       </mesh>
+
+      {/* Hover: physical mechanism label */}
+      {hovered && edge.physicalMechanism && (
+        <Billboard position={[midpoint.x, midpoint.y + 1.5, midpoint.z]}>
+          <Text
+            fontSize={0.5}
+            color="#ffffff"
+            anchorX="center"
+            anchorY="middle"
+            font={undefined}
+            maxWidth={20}
+          >
+            {edge.physicalMechanism}
+          </Text>
+          {isCrossDomain && (
+            <Text
+              fontSize={0.35}
+              color="#e040fb"
+              anchorX="center"
+              anchorY="top"
+              position={[0, -0.5, 0]}
+              font={undefined}
+            >
+              CROSS-DOMAIN
+            </Text>
+          )}
+        </Billboard>
+      )}
     </group>
   );
 }
-

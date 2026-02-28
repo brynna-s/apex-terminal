@@ -167,3 +167,9 @@ canvas {
 .edge-animated {
   animation: edge-flow 1s linear infinite;
 }
+
+/* Scissors cursor */
+body.scissors-cursor,
+body.scissors-cursor canvas {
+  cursor: crosshair !important;
+}

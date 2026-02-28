@@ -8,11 +8,20 @@ export default function InterventionControls() {
     interventionTarget,
     setInterventionMode,
     setInterventionTarget,
+    selectedNode,
     graphData,
+    scissorsMode,
+    severedEdges,
+    setScissorsMode,
+    resetSeveredEdges,
   } = useApexStore();
 
   const targetNode = interventionTarget
     ? graphData.nodes.find((n) => n.id === interventionTarget)
+    : null;
+
+  const selectedNodeData = selectedNode
+    ? graphData.nodes.find((n) => n.id === selectedNode)
     : null;
 
   return (
@@ -33,7 +42,7 @@ export default function InterventionControls() {
           backgroundColor: interventionMode ? "rgba(255,171,0,0.08)" : "transparent",
         }}
       >
-        {interventionMode ? "◉ INTERVENTION ACTIVE" : "○ ENABLE INTERVENTION"}
+        {interventionMode ? "\u25C9 INTERVENTION ACTIVE" : "\u25CB ENABLE INTERVENTION"}
       </button>
 
       {interventionMode && (
@@ -59,6 +68,16 @@ export default function InterventionControls() {
             </div>
           )}
 
+          {/* Set selected node as target */}
+          {selectedNodeData && selectedNode !== interventionTarget && (
+            <button
+              onClick={() => setInterventionTarget(selectedNode)}
+              className="w-full text-[8px] font-mono px-2 py-1.5 rounded border border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/10 transition-colors"
+            >
+              SET SELECTED: do({selectedNodeData.shortLabel})
+            </button>
+          )}
+
           {/* Quick targets */}
           <div className="text-[8px] text-text-muted font-mono mb-1">QUICK TARGETS:</div>
           <div className="flex flex-wrap gap-1">
@@ -76,6 +95,42 @@ export default function InterventionControls() {
                 do({n.shortLabel})
               </button>
             ))}
+          </div>
+
+          {/* Scissors Tool */}
+          <div className="mt-3 pt-3 border-t border-border space-y-2">
+            <div className="font-[family-name:var(--font-michroma)] text-[9px] tracking-wider text-text-muted">
+              SCISSORS TOOL
+            </div>
+            <button
+              onClick={() => setScissorsMode(!scissorsMode)}
+              className="w-full text-[9px] font-[family-name:var(--font-michroma)] tracking-wider px-3 py-2 rounded border transition-colors"
+              style={{
+                borderColor: scissorsMode ? "#ff1744" : "var(--border)",
+                color: scissorsMode ? "#ff1744" : "var(--text-muted)",
+                backgroundColor: scissorsMode ? "rgba(255,23,68,0.08)" : "transparent",
+              }}
+            >
+              {scissorsMode ? "\u2702 SCISSORS ACTIVE" : "\u2702 ENABLE SCISSORS"}
+            </button>
+            {scissorsMode && (
+              <div className="text-[8px] font-mono text-accent-red/80 p-2 border border-accent-red/20 rounded bg-accent-red/5">
+                Click any edge in the DAG to sever it. Consequence nodes will spawn automatically.
+              </div>
+            )}
+            {severedEdges.length > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-mono text-text-muted">
+                  Severed: <span className="text-accent-red">{severedEdges.length}</span> edge{severedEdges.length !== 1 ? "s" : ""}
+                </span>
+                <button
+                  onClick={resetSeveredEdges}
+                  className="text-[8px] font-mono text-text-muted hover:text-accent-red underline"
+                >
+                  Reset all cuts
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { PCMCI_NODES, PCMCI_EDGES, getCategoryColor } from "@/lib/graph-data";
+import { useApexStore } from "@/stores/useApexStore";
 
 // Time-layered layout: T-2, T-1, T-0
 const TIME_COLS = [
@@ -11,16 +12,20 @@ const TIME_COLS = [
 ];
 
 export default function PcmciGraph() {
+  const selectedNode = useApexStore((s) => s.selectedNode);
+  const setSelectedNode = useApexStore((s) => s.setSelectedNode);
+
   const positioned = useMemo(() => {
     // Distribute nodes across time columns based on temporal role
     const nodes = PCMCI_NODES.map((n, i) => {
       // Assign to time columns based on position in causal chain
-      const colIdx = Math.min(2, Math.floor(i / 2));
-      const rowIdx = i % 2;
+      const colIdx = Math.min(2, Math.floor(i / Math.max(1, Math.ceil(PCMCI_NODES.length / 3))));
+      const rowInCol = i % Math.max(1, Math.ceil(PCMCI_NODES.length / 3));
+      const spacing = 90 / Math.max(1, Math.ceil(PCMCI_NODES.length / 3));
       return {
         ...n,
         x: TIME_COLS[colIdx].x,
-        y: 35 + rowIdx * 50 + (colIdx === 1 ? 15 : 0),
+        y: 25 + rowInCol * spacing + (colIdx === 1 ? 10 : 0),
       };
     });
     return nodes;
@@ -39,7 +44,7 @@ export default function PcmciGraph() {
           PCMCI+
         </span>
         <span className="text-[8px] text-text-muted font-mono">
-          Temporal Causal Graph
+          {PCMCI_NODES.length} nodes | Temporal
         </span>
       </div>
       <svg
@@ -89,7 +94,7 @@ export default function PcmciGraph() {
               x2={tgt.x}
               y2={tgt.y}
               stroke="#ffab00"
-              strokeWidth={1.2}
+              strokeWidth={0.5 + edge.weight}
               strokeOpacity={0.6}
               markerEnd="url(#arrow-pcmci)"
             />
@@ -99,24 +104,29 @@ export default function PcmciGraph() {
         {/* Nodes */}
         {positioned.map((node) => {
           const color = getCategoryColor(node.category);
+          const isActive = selectedNode === node.id;
           return (
-            <g key={node.id}>
+            <g
+              key={node.id}
+              style={{ cursor: "pointer" }}
+              onClick={() => setSelectedNode(isActive ? null : node.id)}
+            >
               <circle
                 cx={node.x}
                 cy={node.y}
-                r={8}
-                fill={color}
-                fillOpacity={0.2}
-                stroke="#ffab00"
-                strokeWidth={1}
+                r={6}
+                fill={isActive ? "#00e5ff" : color}
+                fillOpacity={isActive ? 0.35 : 0.2}
+                stroke={isActive ? "#00e5ff" : "#ffab00"}
+                strokeWidth={isActive ? 2 : 1}
               />
               <text
                 x={node.x}
                 y={node.y + 0.5}
                 textAnchor="middle"
                 dominantBaseline="central"
-                fontSize={5.5}
-                fill={color}
+                fontSize={4.5}
+                fill={isActive ? "#00e5ff" : color}
                 fontFamily="monospace"
                 fontWeight="bold"
               >

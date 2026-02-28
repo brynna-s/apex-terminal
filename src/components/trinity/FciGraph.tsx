@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { FCI_NODES, FCI_EDGES, getCategoryColor } from "@/lib/graph-data";
+import { useApexStore } from "@/stores/useApexStore";
 
 function layoutNodes(nodes: typeof FCI_NODES) {
   const w = 260;
@@ -21,6 +22,8 @@ function layoutNodes(nodes: typeof FCI_NODES) {
 }
 
 export default function FciGraph() {
+  const selectedNode = useApexStore((s) => s.selectedNode);
+  const setSelectedNode = useApexStore((s) => s.setSelectedNode);
   const positioned = useMemo(() => layoutNodes(FCI_NODES), []);
   const posMap = useMemo(() => {
     const m: Record<string, { x: number; y: number }> = {};
@@ -39,7 +42,7 @@ export default function FciGraph() {
           FCI
         </span>
         <span className="text-[8px] text-text-muted font-mono">
-          Latent Confounding Graph (PAG)
+          {FCI_NODES.length} nodes | Latent PAG
         </span>
       </div>
       <svg
@@ -61,7 +64,7 @@ export default function FciGraph() {
                 x2={tgt.x}
                 y2={tgt.y}
                 stroke={isConfounded ? "#ff1744" : "#ff6d00"}
-                strokeWidth={1}
+                strokeWidth={0.5 + edge.weight}
                 strokeOpacity={0.5}
                 strokeDasharray={isConfounded ? "4,3" : undefined}
               />
@@ -84,24 +87,29 @@ export default function FciGraph() {
         {/* Nodes */}
         {positioned.map((node) => {
           const color = getCategoryColor(node.category);
+          const isActive = selectedNode === node.id;
           return (
-            <g key={node.id}>
+            <g
+              key={node.id}
+              style={{ cursor: "pointer" }}
+              onClick={() => setSelectedNode(isActive ? null : node.id)}
+            >
               <circle
                 cx={node.x}
                 cy={node.y}
-                r={8}
-                fill={node.isConfounded ? "#ff1744" : color}
-                fillOpacity={0.2}
-                stroke={node.isConfounded ? "#ff1744" : color}
-                strokeWidth={1}
+                r={6}
+                fill={isActive ? "#00e5ff" : node.isConfounded ? "#ff1744" : color}
+                fillOpacity={isActive ? 0.35 : 0.2}
+                stroke={isActive ? "#00e5ff" : node.isConfounded ? "#ff1744" : color}
+                strokeWidth={isActive ? 2 : 1}
               />
               <text
                 x={node.x}
                 y={node.y + 0.5}
                 textAnchor="middle"
                 dominantBaseline="central"
-                fontSize={5.5}
-                fill={node.isConfounded ? "#ff9a9a" : color}
+                fontSize={4.5}
+                fill={isActive ? "#00e5ff" : node.isConfounded ? "#ff9a9a" : color}
                 fontFamily="monospace"
                 fontWeight="bold"
               >

@@ -42,6 +42,15 @@ export interface TerminalLine {
   module?: ModuleId;
 }
 
+// ─── Omega-Fragility Profile ────────────────────────────────────
+export interface OmegaFragilityProfile {
+  composite: number;              // 0-10 headline score
+  substitutionFriction: number;   // 0-10 time to re-create
+  downstreamLoad: number;         // 0-10 GDP/sectors dependent
+  cascadingVoltage: number;       // 0-10 non-linear propagation
+  existentialTailWeight: number;  // 0-10 distributional depth beyond VaR
+}
+
 // ─── Causal Graph ────────────────────────────────────────────────
 export type NodeCategory =
   | "manufacturing"
@@ -49,7 +58,9 @@ export type NodeCategory =
   | "economic"
   | "finance"
   | "energy"
-  | "geopolitical";
+  | "geopolitical"
+  | "communications"
+  | "agriculture";
 
 export type EdgeType = "directed" | "confounded" | "temporal";
 
@@ -58,11 +69,17 @@ export interface CausalNode {
   label: string;
   shortLabel: string; // abbreviated for sub-panels
   category: NodeCategory;
-  riskScore: number; // 0-1
+  omegaFragility: OmegaFragilityProfile;
+  globalConcentration: string; // e.g. "100% ASML", "93% China"
+  replacementTime: string; // e.g. "5-7 years"
+  physicalConstraint?: string;
+  domain: string; // playbook domain name
   discoverySource: "DCD" | "PCMCI+" | "FCI" | "merged";
   isConfounded: boolean;
   isRestricted: boolean; // Tarski restriction
   position3d?: { x: number; y: number; z: number };
+  isConsequence?: boolean; // spawned by scissors tool
+  consequenceOf?: string; // edge ID that spawned this node
 }
 
 export interface CausalEdge {
@@ -74,6 +91,9 @@ export interface CausalEdge {
   type: EdgeType;
   confidence: number; // 0-1
   isInconsistent: boolean; // Tarski flagged
+  physicalMechanism: string; // e.g. "powers", "constrains supply"
+  isSevered?: boolean; // cut by scissors tool
+  isConsequenceEdge?: boolean; // connects consequence nodes
 }
 
 export interface GraphMetadata {
@@ -108,7 +128,9 @@ export interface RiskPropagationCard {
   nodeId: string;
   label: string;
   category: NodeCategory;
-  riskPercent: number; // 0-100
+  omegaScore: number; // 0-10
+  domain: string;
+  globalConcentration: string;
 }
 
 // ─── View State ──────────────────────────────────────────────────

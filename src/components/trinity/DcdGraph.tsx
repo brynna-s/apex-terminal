@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { DCD_NODES, DCD_EDGES, getCategoryColor } from "@/lib/graph-data";
+import { useApexStore } from "@/stores/useApexStore";
 
 // Simple 2D force layout positions for the small graph
 function layoutNodes(nodes: typeof DCD_NODES) {
@@ -22,6 +23,8 @@ function layoutNodes(nodes: typeof DCD_NODES) {
 }
 
 export default function DcdGraph() {
+  const selectedNode = useApexStore((s) => s.selectedNode);
+  const setSelectedNode = useApexStore((s) => s.setSelectedNode);
   const positioned = useMemo(() => layoutNodes(DCD_NODES), []);
   const posMap = useMemo(() => {
     const m: Record<string, { x: number; y: number }> = {};
@@ -36,7 +39,7 @@ export default function DcdGraph() {
           DCD / NOTEARS
         </span>
         <span className="text-[8px] text-text-muted font-mono">
-          Nonlinear Structural Discovery
+          {DCD_NODES.length} nodes | Structural
         </span>
       </div>
       <svg
@@ -57,7 +60,7 @@ export default function DcdGraph() {
               x2={tgt.x}
               y2={tgt.y}
               stroke="#00e5ff"
-              strokeWidth={1}
+              strokeWidth={0.5 + edge.weight}
               strokeOpacity={0.5}
               markerEnd="url(#arrow-dcd)"
             />
@@ -67,24 +70,30 @@ export default function DcdGraph() {
         {/* Nodes */}
         {positioned.map((node) => {
           const color = getCategoryColor(node.category);
+          const r = 4 + (node.omegaFragility.composite / 10) * 6;
+          const isActive = selectedNode === node.id;
           return (
-            <g key={node.id}>
+            <g
+              key={node.id}
+              style={{ cursor: "pointer" }}
+              onClick={() => setSelectedNode(isActive ? null : node.id)}
+            >
               <circle
                 cx={node.x}
                 cy={node.y}
-                r={8}
-                fill={color}
-                fillOpacity={0.2}
-                stroke={color}
-                strokeWidth={1}
+                r={r}
+                fill={isActive ? "#00e5ff" : color}
+                fillOpacity={isActive ? 0.35 : 0.2}
+                stroke={isActive ? "#00e5ff" : color}
+                strokeWidth={isActive ? 2 : 1}
               />
               <text
                 x={node.x}
                 y={node.y + 0.5}
                 textAnchor="middle"
                 dominantBaseline="central"
-                fontSize={6}
-                fill={color}
+                fontSize={5}
+                fill={isActive ? "#00e5ff" : color}
                 fontFamily="monospace"
                 fontWeight="bold"
               >

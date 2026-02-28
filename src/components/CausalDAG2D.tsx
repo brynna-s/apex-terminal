@@ -17,34 +17,21 @@ import { useApexStore } from "@/stores/useApexStore";
 import { getCategoryColor } from "@/lib/graph-data";
 import DAGOverlay from "./dag3d/DAGOverlay";
 
-const NODE_POSITIONS: Record<string, { x: number; y: number }> = {
-  semi_yield: { x: 400, y: 20 },
-  ai_compute: { x: 200, y: 150 },
-  industrial_output: { x: 600, y: 150 },
-  credit_contraction: { x: 400, y: 280 },
-  dc_power: { x: 100, y: 280 },
-  banking_liquidity: { x: 600, y: 400 },
-  rare_earth: { x: 50, y: 120 },
-  grid_stability: { x: 0, y: 400 },
-  trade_policy: { x: 750, y: 280 },
-  cooling_capacity: { x: 200, y: 400 },
-};
-
 function CausalNode2D({ data }: NodeProps) {
-  const { label, category, riskScore, isRestricted } = data;
+  const { label, category, omegaComposite, isRestricted, domain } = data;
   const color = getCategoryColor(category);
-  const isFractured = riskScore > 0.6;
-  const isStressed = riskScore > 0.3;
+  const isFractured = omegaComposite > 9;
+  const isStressed = omegaComposite > 7;
 
   return (
     <motion.div
       className="relative px-5 py-3 rounded border font-mono text-[11px] tracking-wider text-center min-w-[120px]"
       style={{
         borderColor: isRestricted ? "#ff1744" : color,
-        backgroundColor: `color-mix(in srgb, ${color} ${Math.round(5 + riskScore * 15)}%, #0a0b10)`,
+        backgroundColor: `color-mix(in srgb, ${color} ${Math.round(5 + (omegaComposite / 10) * 15)}%, #0a0b10)`,
         color,
-        boxShadow: riskScore > 0
-          ? `0 0 ${Math.round(riskScore * 20)}px ${color}40, inset 0 0 ${Math.round(riskScore * 10)}px ${color}20`
+        boxShadow: omegaComposite > 0
+          ? `0 0 ${Math.round((omegaComposite / 10) * 20)}px ${color}40, inset 0 0 ${Math.round((omegaComposite / 10) * 10)}px ${color}20`
           : "none",
       }}
       animate={
@@ -70,9 +57,12 @@ function CausalNode2D({ data }: NodeProps) {
       <div className="font-[family-name:var(--font-michroma)] text-[10px]">
         {label}
       </div>
-      {riskScore > 0 && (
+      <div className="text-[8px] mt-0.5 opacity-50">
+        {domain}
+      </div>
+      {omegaComposite > 0 && (
         <div className="text-[9px] mt-1 opacity-70">
-          RISK: {(riskScore * 100).toFixed(0)}%
+          {"\u03A9"} {omegaComposite.toFixed(1)}
         </div>
       )}
       {isRestricted && (
@@ -89,14 +79,18 @@ export default function CausalDAG2D() {
 
   const nodes: Node[] = useMemo(
     () =>
-      graphData.nodes.map((n) => ({
+      graphData.nodes.map((n, i) => ({
         id: n.id,
         type: "causal",
-        position: NODE_POSITIONS[n.id] || { x: Math.random() * 600, y: Math.random() * 400 },
+        position: {
+          x: (i % 5) * 200 + 50 + (Math.sin(i * 1.7) * 40),
+          y: Math.floor(i / 5) * 160 + 30 + (Math.cos(i * 2.3) * 30),
+        },
         data: {
           label: n.label,
           category: n.category,
-          riskScore: n.riskScore,
+          omegaComposite: n.omegaFragility.composite,
+          domain: n.domain,
           isRestricted: truthFilter === "verified" && n.isRestricted,
         },
       })),
@@ -123,7 +117,7 @@ export default function CausalDAG2D() {
           animated: e.type === "temporal",
           style: {
             stroke: edgeColor,
-            strokeWidth: 1.5,
+            strokeWidth: 0.5 + e.weight * 1.5,
             strokeDasharray: e.type === "confounded" || isInconsistent ? "5,5" : undefined,
             opacity: isInconsistent ? 0.6 : 0.7,
           },
@@ -154,7 +148,7 @@ export default function CausalDAG2D() {
         fitView
         fitViewOptions={{ padding: 0.3 }}
         proOptions={{ hideAttribution: true }}
-        minZoom={0.5}
+        minZoom={0.3}
         maxZoom={2}
         nodesDraggable={true}
         nodesConnectable={false}

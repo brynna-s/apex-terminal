@@ -16,6 +16,7 @@ interface ApexState {
 
   // Causal graph
   graphData: CausalGraph;
+  initialGraph: CausalGraph;
   setGraphData: (g: CausalGraph) => void;
 
   // Shocks
@@ -31,11 +32,22 @@ interface ApexState {
   truthFilter: TruthFilter;
   setTruthFilter: (f: TruthFilter) => void;
 
+  // Selected node (focus)
+  selectedNode: string | null;
+  setSelectedNode: (nodeId: string | null) => void;
+
   // Intervention mode
   interventionMode: boolean;
   interventionTarget: string | null;
   setInterventionMode: (on: boolean) => void;
   setInterventionTarget: (nodeId: string | null) => void;
+
+  // Scissors tool (Pearl)
+  scissorsMode: boolean;
+  severedEdges: string[];
+  setScissorsMode: (on: boolean) => void;
+  severEdge: (edgeId: string) => void;
+  resetSeveredEdges: () => void;
 
   // Copilot
   copilotMessages: CopilotMessage[];
@@ -49,7 +61,8 @@ export const useApexStore = create<ApexState>((set) => ({
 
   // Graph
   graphData: MAIN_GRAPH,
-  setGraphData: (g) => set({ graphData: g }),
+  initialGraph: MAIN_GRAPH,
+  setGraphData: (g) => set({ graphData: g, initialGraph: g }),
 
   // Shocks
   shocks: [],
@@ -69,12 +82,28 @@ export const useApexStore = create<ApexState>((set) => ({
   truthFilter: "raw",
   setTruthFilter: (f) => set({ truthFilter: f }),
 
+  // Selected node
+  selectedNode: null,
+  setSelectedNode: (nodeId) => set({ selectedNode: nodeId }),
+
   // Intervention
   interventionMode: false,
   interventionTarget: null,
   setInterventionMode: (on) =>
     set({ interventionMode: on, interventionTarget: on ? null : null }),
   setInterventionTarget: (nodeId) => set({ interventionTarget: nodeId }),
+
+  // Scissors
+  scissorsMode: false,
+  severedEdges: [],
+  setScissorsMode: (on) => set({ scissorsMode: on }),
+  severEdge: (edgeId) =>
+    set((s) => {
+      if (s.severedEdges.includes(edgeId)) return s;
+      return { severedEdges: [...s.severedEdges, edgeId] };
+    }),
+  resetSeveredEdges: () =>
+    set((s) => ({ severedEdges: [], scissorsMode: false, graphData: s.initialGraph })),
 
   // Copilot
   copilotMessages: [

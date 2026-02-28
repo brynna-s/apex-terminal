@@ -7,14 +7,14 @@ import {
   processAction,
   processQuery,
   processNodeAnalysis,
-  CopilotAction,
-} from "@/lib/copilot-engine";
+  AthenaCopilotAction,
+} from "@/lib/athena-copilot-engine";
 import { CopilotMessage } from "@/lib/types";
 
-const ACTIONS: { label: string; action: CopilotAction; color: string }[] = [
-  { label: "DISCOVER STRUCTURE", action: "DISCOVER_STRUCTURE", color: "var(--accent-cyan)" },
-  { label: "EXPLAIN REJECTION", action: "EXPLAIN_REJECTION", color: "var(--accent-green)" },
-  { label: "VERIFY LOGIC", action: "VERIFY_LOGIC", color: "var(--accent-amber)" },
+const ACTIONS: { label: string; action: AthenaCopilotAction; color: string }[] = [
+  { label: "DISCOVER ISR STRUCTURE", action: "DISCOVER_ISR_STRUCTURE", color: "var(--accent-cyan)" },
+  { label: "VERIFY KILL CHAIN", action: "VERIFY_KILL_CHAIN", color: "var(--accent-amber)" },
+  { label: "ASSESS EMBARGO RISK", action: "ASSESS_EMBARGO_RISK", color: "var(--accent-red)" },
 ];
 
 function getRoleColor(role: CopilotMessage["role"]): string {
@@ -29,11 +29,11 @@ function getRoleLabel(role: CopilotMessage["role"]): string {
   switch (role) {
     case "system": return "SYS";
     case "user": return "YOU";
-    case "assistant": return "APEX";
+    case "assistant": return "ATHENA";
   }
 }
 
-export default function SystemCopilot() {
+export default function ClientSystemCopilot() {
   const { copilotMessages, addCopilotMessage, graphData, selectedNode } = useApexStore();
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -53,7 +53,7 @@ export default function SystemCopilot() {
         addCopilotMessage({
           id: `sys-node-${Date.now()}`,
           role: "system",
-          content: `NODE FOCUSED: ${node.label} (\u03A9 ${node.omegaFragility.composite.toFixed(1)}) — ${node.domain} — ${node.globalConcentration} — ${node.replacementTime}`,
+          content: `NODE FOCUSED: ${node.label} (Ω ${node.omegaFragility.composite.toFixed(1)}) — ${node.domain} — ${node.globalConcentration} — ${node.replacementTime}`,
           timestamp: Date.now(),
         });
       }
@@ -61,7 +61,7 @@ export default function SystemCopilot() {
     lastSelectedRef.current = selectedNode;
   }, [selectedNode, graphData.nodes, addCopilotMessage]);
 
-  const handleAction = (action: CopilotAction) => {
+  const handleAction = (action: AthenaCopilotAction) => {
     const userMsg: CopilotMessage = {
       id: `user-${Date.now()}`,
       role: "user",
@@ -114,10 +114,10 @@ export default function SystemCopilot() {
       {/* Header */}
       <div className="px-4 py-3 border-b border-border bg-surface-elevated">
         <div className="font-[family-name:var(--font-michroma)] text-[10px] tracking-[0.25em] text-accent-cyan">
-          SYSTEM COPILOT
+          MISSION COPILOT
         </div>
         <div className="text-[9px] text-text-muted font-mono mt-0.5">
-          Synthetic Scientist Interface
+          ISR Analysis Interface
         </div>
       </div>
 
@@ -200,7 +200,7 @@ export default function SystemCopilot() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
             className="flex-1 bg-surface-elevated font-mono text-[11px] text-foreground outline-none px-2.5 py-1.5 rounded border border-border placeholder:text-text-muted focus:border-accent-cyan/50 transition-colors"
-            placeholder="Ask the system to analyze or verify..."
+            placeholder="Ask about ISR ops, kill chain, ITAR..."
             spellCheck={false}
           />
           <button
