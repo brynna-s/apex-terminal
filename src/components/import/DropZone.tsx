@@ -3,11 +3,11 @@
 import { useCallback, useRef, useState } from "react";
 
 interface DropZoneProps {
-  onFileSelected: (file: File) => void;
+  onFileSelected: (files: File[]) => void;
 }
 
 const ACCEPT =
-  ".csv,.json,.graphml,.gml,.dot,.gv";
+  ".csv,.json,.graphml,.gml,.dot,.gv,.xlsx,.xls";
 
 export default function DropZone({ onFileSelected }: DropZoneProps) {
   const [dragOver, setDragOver] = useState(false);
@@ -17,16 +17,16 @@ export default function DropZone({ onFileSelected }: DropZoneProps) {
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
-      const file = e.dataTransfer.files[0];
-      if (file) onFileSelected(file);
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) onFileSelected(files);
     },
     [onFileSelected]
   );
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) onFileSelected(file);
+      const files = Array.from(e.target.files ?? []);
+      if (files.length > 0) onFileSelected(files);
     },
     [onFileSelected]
   );
@@ -54,6 +54,7 @@ export default function DropZone({ onFileSelected }: DropZoneProps) {
         ref={inputRef}
         type="file"
         accept={ACCEPT}
+        multiple
         onChange={handleChange}
         className="hidden"
       />
@@ -66,10 +67,10 @@ export default function DropZone({ onFileSelected }: DropZoneProps) {
       {/* Text */}
       <div className="flex flex-col items-center gap-1">
         <span className="text-[11px] font-mono tracking-wider text-foreground">
-          {dragOver ? "DROP FILE TO IMPORT" : "DRAG & DROP OR CLICK TO SELECT"}
+          {dragOver ? "DROP FILES TO IMPORT" : "DRAG & DROP FILES OR CLICK TO SELECT"}
         </span>
         <span className="text-[9px] font-mono text-text-muted tracking-wider">
-          CSV &middot; JSON &middot; GRAPHML &middot; DOT
+          CSV &middot; JSON &middot; GRAPHML &middot; DOT &middot; XLSX
         </span>
       </div>
     </div>

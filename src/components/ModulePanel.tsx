@@ -2,11 +2,12 @@
 
 import { useMemo } from "react";
 import { useApexStore } from "@/stores/useApexStore";
-import { computeOmegaState, computeDoomsdayState, computeCascadeAnalysis } from "@/lib/omega-engine";
+import { computeOmegaState, computeDoomsdayState, computeCascadeAnalysis, getPresetShocks } from "@/lib/omega-engine";
 import { getDomainColor } from "@/lib/graph-data";
 import { AXIOM_LIBRARY, PROOF_TRACES } from "@/lib/tarski-data";
 import TrinityPanel from "./TrinityPanel";
 import InterventionControls from "./InterventionControls";
+import AblationPanel from "./AblationPanel";
 import NodeInspector from "./NodeInspector";
 
 export default function ModulePanel() {
@@ -48,6 +49,7 @@ export default function ModulePanel() {
         {activeModule === "pearl" && (
           <div className="p-4 space-y-3">
             <InterventionControls />
+            <AblationPanel />
           </div>
         )}
 
@@ -122,9 +124,12 @@ function TarskiPanel() {
 
 function ParetoPanel() {
   const shocks = useApexStore((s) => s.shocks);
+  const addShock = useApexStore((s) => s.addShock);
+  const removeShock = useApexStore((s) => s.removeShock);
   const graphData = useApexStore((s) => s.graphData);
   const selectedNode = useApexStore((s) => s.selectedNode);
   const setSelectedNode = useApexStore((s) => s.setSelectedNode);
+  const presetShocks = useMemo(() => getPresetShocks(), []);
   const omegaState = useMemo(() => computeOmegaState(shocks), [shocks]);
   const doomsday = useMemo(
     () => computeDoomsdayState(shocks, omegaState.buffer),
@@ -252,18 +257,47 @@ function ParetoPanel() {
           {shocks.map((s) => (
             <div
               key={s.id}
-              className="text-[9px] font-mono p-1.5 border border-accent-red/20 rounded bg-accent-red/5 text-accent-red"
+              className="text-[9px] font-mono p-1.5 border border-accent-red/20 rounded bg-accent-red/5 text-accent-red flex items-center justify-between"
             >
-              {s.name} — SEV: {(s.severity * 100).toFixed(0)}%
+              <span>{s.name} — SEV: {(s.severity * 100).toFixed(0)}%</span>
+              <button
+                onClick={() => removeShock(s.id)}
+                className="text-[8px] opacity-60 hover:opacity-100 transition-opacity ml-2"
+              >
+                ✕
+              </button>
             </div>
           ))}
         </div>
       )}
-      {shocks.length === 0 && (
-        <div className="text-[9px] font-mono text-text-muted italic mt-2">
-          No active shocks. System nominal.
+
+      {/* Shock Injector */}
+      <div className="mt-3">
+        <div className="font-[family-name:var(--font-michroma)] text-[9px] tracking-wider text-text-muted mb-1.5">
+          INJECT SHOCK
         </div>
-      )}
+        <div className="space-y-1 max-h-36 overflow-y-auto">
+          {presetShocks.map((shock) => {
+            const isActive = shocks.some((s) => s.id === shock.id);
+            return (
+              <button
+                key={shock.id}
+                onClick={() => !isActive && addShock(shock)}
+                disabled={isActive}
+                className="w-full text-left text-[8px] font-mono p-1.5 border rounded transition-colors disabled:opacity-30"
+                style={{
+                  borderColor: isActive ? "rgba(255,23,68,0.3)" : "var(--border)",
+                  backgroundColor: isActive ? "rgba(255,23,68,0.05)" : "transparent",
+                  color: isActive ? "var(--accent-red)" : "var(--text-muted)",
+                }}
+              >
+                {shock.name}
+                <span className="opacity-60 ml-1">SEV:{(shock.severity * 100).toFixed(0)}%</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </>
   );
 }

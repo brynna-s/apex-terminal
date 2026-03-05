@@ -78,7 +78,7 @@ export interface CausalNode {
   isConfounded: boolean;
   isRestricted: boolean; // Tarski restriction
   position3d?: { x: number; y: number; z: number };
-  isConsequence?: boolean; // spawned by scissors tool
+  isConsequence?: boolean; // spawned by link break tool
   consequenceOf?: string; // edge ID that spawned this node
 }
 
@@ -92,8 +92,8 @@ export interface CausalEdge {
   confidence: number; // 0-1
   isInconsistent: boolean; // Tarski flagged
   physicalMechanism: string; // e.g. "powers", "constrains supply"
-  isSevered?: boolean; // cut by scissors tool
-  isConsequenceEdge?: boolean; // connects consequence nodes
+  isSevered?: boolean; // severed by link break tool
+  isConsequenceEdge?: boolean; // spawned by link break
 }
 
 export interface GraphMetadata {
@@ -198,3 +198,30 @@ export interface DAGNode {
   fragility: number; // 0-1, Ω-Fragility score
   status: "stable" | "stressed" | "fractured";
 }
+
+// ─── Replay / Cascade Simulation ───────────────────────────────
+export interface NodeEpochState {
+  omegaComposite: number;
+  omegaProfile: OmegaFragilityProfile;
+  shockIntensity: number; // 0-1
+  isActivated: boolean;
+}
+
+export interface EdgeEpochState {
+  activeWeight: number;
+  propagationSignal: number; // 0-1
+  isSevered: boolean;
+}
+
+export interface EpochSnapshot {
+  epoch: number;
+  nodeStates: Record<string, NodeEpochState>;
+  edgeStates: Record<string, EdgeEpochState>;
+  omegaBuffer: number;
+  omegaStatus: OmegaStatus;
+  criticalityEstimate: number | null; // epochs until critical, null if stable
+  isStable: boolean;
+  isCritical: boolean;
+}
+
+export type TimelineId = "baseline" | "intervention";

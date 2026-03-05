@@ -11,6 +11,9 @@ import { getNodeDomainMap } from "@/lib/graph-data";
 import DAGNode3D from "./dag3d/DAGNode3D";
 import DAGEdge3D from "./dag3d/DAGEdge3D";
 import DAGOverlay from "./dag3d/DAGOverlay";
+import ReplayControls from "./ReplayControls";
+import { useReplayTick } from "@/lib/useReplayTick";
+import { EpochSnapshot } from "@/lib/types";
 
 // Error boundary to catch WebGL context loss and recover
 class DAGErrorBoundary extends React.Component<
@@ -159,6 +162,11 @@ function useWebGLRecovery() {
   return canvasKey;
 }
 
+function ReplayTickDriver() {
+  useReplayTick();
+  return null;
+}
+
 export default function CausalDAG3D() {
   const {
     graphData,
@@ -172,7 +180,24 @@ export default function CausalDAG3D() {
     scissorsMode,
     severedEdges,
     severEdge,
+    ablationMode,
+    ablatedNodeIds,
+    ablatedEdgeIds,
+    toggleAblatedNode,
+    toggleAblatedEdge,
+    replayActive,
+    currentEpoch,
+    baselineEpochs,
+    interventionEpochs,
+    activeTimeline,
   } = useApexStore();
+
+  // Derive current snapshot from active timeline
+  const replayEpochs = activeTimeline === "baseline" ? baselineEpochs : interventionEpochs;
+  const currentSnapshot: EpochSnapshot | null =
+    replayActive && replayEpochs.length > 0
+      ? replayEpochs[currentEpoch] ?? null
+      : null;
 
   const canvasKey = useWebGLRecovery();
   const positionsRef = useRef<NodePosition[]>([]);
@@ -348,6 +373,16 @@ export default function CausalDAG3D() {
     return () => document.body.classList.remove("scissors-cursor");
   }, [scissorsMode]);
 
+  // Body class effect for ablation cursor
+  useEffect(() => {
+    if (ablationMode) {
+      document.body.classList.add("ablation-cursor");
+    } else {
+      document.body.classList.remove("ablation-cursor");
+    }
+    return () => document.body.classList.remove("ablation-cursor");
+  }, [ablationMode]);
+
   const handleDoubleClick = useCallback(
     (nodeId: string) => {
       setSelectedNode(selectedNode === nodeId ? null : nodeId);
@@ -369,6 +404,7 @@ export default function CausalDAG3D() {
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       <DAGOverlay />
+      <ReplayControls />
       <DAGErrorBoundary>
       <Canvas
         key={canvasKey}
@@ -417,9 +453,14 @@ export default function CausalDAG3D() {
                 anyNodeSelected={anyNodeSelected}
                 isConsequence={node.isConsequence ?? false}
                 isGreyedOut={greyedOutNodes.has(node.id) || disconnectedNodes.has(node.id)}
+                isAblated={ablatedNodeIds.includes(node.id)}
+                ablationMode={ablationMode}
+                epochState={currentSnapshot?.nodeStates[node.id]}
                 onDoubleClick={() => handleDoubleClick(node.id)}
                 onClick={() => {
-                  if (interventionMode) {
+                  if (ablationMode) {
+                    toggleAblatedNode(node.id);
+                  } else if (interventionMode) {
                     setInterventionTarget(
                       interventionTarget === node.id ? null : node.id
                     );
@@ -473,11 +514,16 @@ export default function CausalDAG3D() {
                 isConsequenceEdge={edge.isConsequenceEdge ?? false}
                 scissorsMode={scissorsMode}
                 onScissorsClick={() => handleScissorsClick(edge.id)}
+                isAblated={ablatedEdgeIds.includes(edge.id)}
+                ablationMode={ablationMode}
+                onAblationClick={() => toggleAblatedEdge(edge.id)}
+                epochState={currentSnapshot?.edgeStates[edge.id]}
               />
             );
           })}
 
           <CameraRig posMap={posMap} />
+          <ReplayTickDriver />
       </Canvas>
       </DAGErrorBoundary>
     </div>

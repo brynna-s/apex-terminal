@@ -168,8 +168,14 @@ canvas {
   animation: edge-flow 1s linear infinite;
 }
 
-/* Scissors cursor */
+/* Link break cursor */
 body.scissors-cursor,
 body.scissors-cursor canvas {
+  cursor: crosshair !important;
+}
+
+/* Ablation cursor */
+body.ablation-cursor,
+body.ablation-cursor canvas {
   cursor: crosshair !important;
 }

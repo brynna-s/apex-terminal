@@ -1,6 +1,7 @@
 import { CausalGraph, NodeCategory, EdgeType } from "@/lib/types";
 import { ParsedGraph, ValidationIssue, ValidationResult } from "./types";
 import { applyNodeDefaults, applyEdgeDefaults } from "./defaults";
+import { enrichGraph } from "./enrich";
 
 const VALID_CATEGORIES: Set<string> = new Set<NodeCategory>([
   "manufacturing",
@@ -196,8 +197,21 @@ export function validateParsedGraph(
   }
 
   // ─── Apply defaults and produce resolved arrays ──────────────
-  const resolvedNodes = parsed.nodes.map((raw, i) => applyNodeDefaults(raw, i));
-  const resolvedEdges = parsed.edges.map((raw, i) => applyEdgeDefaults(raw, i));
+  const defaultedNodes = parsed.nodes.map((raw, i) => applyNodeDefaults(raw, i));
+  const defaultedEdges = parsed.edges.map((raw, i) => applyEdgeDefaults(raw, i));
+
+  // ─── Post-import enrichment: auto-edges & omega scoring ─────
+  const { nodes: resolvedNodes, edges: resolvedEdges, warnings: enrichWarnings } =
+    enrichGraph(defaultedNodes, defaultedEdges);
+
+  for (const warning of enrichWarnings) {
+    issues.push({
+      severity: "info",
+      row: -1,
+      entity: "graph",
+      message: warning,
+    });
+  }
 
   const hasErrors = issues.some((iss) => iss.severity === "error");
 

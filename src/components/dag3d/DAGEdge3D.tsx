@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Billboard, Text } from "@react-three/drei";
 import * as THREE from "three";
-import { CausalEdge } from "@/lib/types";
+import { CausalEdge, EdgeEpochState } from "@/lib/types";
 
 interface DAGEdge3DProps {
   edge: CausalEdge;
@@ -19,6 +19,10 @@ interface DAGEdge3DProps {
   isConsequenceEdge?: boolean;
   scissorsMode?: boolean;
   onScissorsClick?: () => void;
+  isAblated?: boolean;
+  ablationMode?: boolean;
+  onAblationClick?: () => void;
+  epochState?: EdgeEpochState;
 }
 
 function getEdgeColor(edge: CausalEdge, isVerifiedInconsistent: boolean, isCrossDomain: boolean): string {
@@ -46,10 +50,14 @@ export default function DAGEdge3D({
   isConsequenceEdge = false,
   scissorsMode = false,
   onScissorsClick,
+  isAblated = false,
+  ablationMode = false,
+  onAblationClick,
+  epochState,
 }: DAGEdge3DProps) {
   const [hovered, setHovered] = useState(false);
   const baseColor = getEdgeColor(edge, isVerifiedInconsistent, isCrossDomain);
-  const color = isSevered ? "#ff1744" : isConsequenceEdge ? "#ff6d00" : baseColor;
+  const color = isAblated ? "#e040fb" : isSevered ? "#ff1744" : isConsequenceEdge ? "#ff6d00" : baseColor;
   const lineWidth = 0.5 + edge.weight * 1.5;
 
   const { points, arrowPosition, arrowRotation, midpoint } = useMemo(() => {
@@ -89,16 +97,18 @@ export default function DAGEdge3D({
     return geometry;
   }, [points]);
 
-  const useDashed = isSevered || edge.type === "confounded" || isVerifiedInconsistent || isCrossDomain;
-  const dashSize = useDashed ? (isSevered ? 0.6 : isCrossDomain ? 0.8 : 0.5) : 0;
-  const gapSize = useDashed ? (isSevered ? 0.4 : isCrossDomain ? 0.4 : 0.3) : 0;
+  const useDashed = isAblated || isSevered || edge.type === "confounded" || isVerifiedInconsistent || isCrossDomain;
+  const dashSize = useDashed ? (isAblated ? 0.6 : isSevered ? 0.6 : isCrossDomain ? 0.8 : 0.5) : 0;
+  const gapSize = useDashed ? (isAblated ? 0.4 : isSevered ? 0.4 : isCrossDomain ? 0.4 : 0.3) : 0;
 
   // Selection-aware opacity: dim non-connected edges when a node is selected
   const selectionDim = anyNodeSelected && !isConnectedToSelected;
-  const baseOpacity = isSevered ? 0.25 : isDimmed ? 0.15 : isHighlighted ? 0.9 : hovered ? 0.8 : isConsequenceEdge ? 0.85 : 0.5;
-  const lineOpacity = selectionDim ? 0.05 : isConnectedToSelected ? 1.0 : baseOpacity;
-  const arrowBaseOpacity = isSevered ? 0 : isDimmed ? 0.15 : 0.7;
-  const arrowOpacity = selectionDim ? 0.05 : isConnectedToSelected ? 1.0 : arrowBaseOpacity;
+  const propSignal = epochState ? epochState.propagationSignal : 0;
+  const propBoost = propSignal * 0.5; // brighter edges during propagation
+  const baseOpacity = isAblated ? 0.15 : isSevered ? 0.25 : isDimmed ? 0.15 : isHighlighted ? 0.9 : hovered ? 0.8 : isConsequenceEdge ? 0.85 : (0.5 + propBoost);
+  const lineOpacity = selectionDim ? 0.05 : isConnectedToSelected ? 1.0 : Math.min(1, baseOpacity);
+  const arrowBaseOpacity = isSevered ? 0 : isDimmed ? 0.15 : (0.7 + propBoost);
+  const arrowOpacity = selectionDim ? 0.05 : isConnectedToSelected ? 1.0 : Math.min(1, arrowBaseOpacity);
 
   return (
     <group>
@@ -107,9 +117,15 @@ export default function DAGEdge3D({
         position={[midpoint.x, midpoint.y, midpoint.z]}
         onPointerOver={() => setHovered(true)}
         onPointerOut={() => setHovered(false)}
-        onClick={scissorsMode && onScissorsClick && !isSevered ? onScissorsClick : undefined}
+        onClick={
+          ablationMode && onAblationClick
+            ? onAblationClick
+            : scissorsMode && onScissorsClick && !isSevered
+              ? onScissorsClick
+              : undefined
+        }
       >
-        <sphereGeometry args={[scissorsMode ? 3.5 : 2, 8, 8]} />
+        <sphereGeometry args={[scissorsMode || ablationMode ? 3.5 : 2, 8, 8]} />
         <meshBasicMaterial transparent opacity={0} />
       </mesh>
 

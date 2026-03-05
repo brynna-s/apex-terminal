@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { PCMCI_NODES, PCMCI_EDGES, getCategoryColor } from "@/lib/graph-data";
+import { getCategoryColor } from "@/lib/graph-data";
 import { useApexStore } from "@/stores/useApexStore";
+import { CausalNode } from "@/lib/types";
 
 // Time-layered layout: T-2, T-1, T-0
 const TIME_COLS = [
@@ -12,30 +13,71 @@ const TIME_COLS = [
 ];
 
 export default function PcmciGraph() {
+  const graphData = useApexStore((s) => s.graphData);
   const selectedNode = useApexStore((s) => s.selectedNode);
   const setSelectedNode = useApexStore((s) => s.setSelectedNode);
 
+  const pcmciNodes = useMemo(() => {
+    // Start with PCMCI+ and merged nodes
+    const baseNodes = graphData.nodes.filter(
+      (n) => n.discoverySource === "PCMCI+" || n.discoverySource === "merged"
+    );
+    const nodeIds = new Set(baseNodes.map((n) => n.id));
+
+    // Also include nodes that are sources/targets of temporal edges
+    const temporalEdges = graphData.edges.filter((e) => e.lag > 0);
+    const extras: CausalNode[] = [];
+    temporalEdges.forEach((e) => {
+      if (!nodeIds.has(e.source)) {
+        const node = graphData.nodes.find((n) => n.id === e.source);
+        if (node) { extras.push(node); nodeIds.add(e.source); }
+      }
+      if (!nodeIds.has(e.target)) {
+        const node = graphData.nodes.find((n) => n.id === e.target);
+        if (node) { extras.push(node); nodeIds.add(e.target); }
+      }
+    });
+
+    return [...baseNodes, ...extras];
+  }, [graphData.nodes, graphData.edges]);
+
+  const pcmciEdges = useMemo(() => {
+    const nodeIds = new Set(pcmciNodes.map((n) => n.id));
+    return graphData.edges.filter(
+      (e) => e.lag > 0 && nodeIds.has(e.source) && nodeIds.has(e.target)
+    );
+  }, [graphData.edges, pcmciNodes]);
+
   const positioned = useMemo(() => {
-    // Distribute nodes across time columns based on temporal role
-    const nodes = PCMCI_NODES.map((n, i) => {
-      // Assign to time columns based on position in causal chain
-      const colIdx = Math.min(2, Math.floor(i / Math.max(1, Math.ceil(PCMCI_NODES.length / 3))));
-      const rowInCol = i % Math.max(1, Math.ceil(PCMCI_NODES.length / 3));
-      const spacing = 90 / Math.max(1, Math.ceil(PCMCI_NODES.length / 3));
+    // Distribute nodes across time columns based on position in causal chain
+    return pcmciNodes.map((n, i) => {
+      const colIdx = Math.min(2, Math.floor(i / Math.max(1, Math.ceil(pcmciNodes.length / 3))));
+      const rowInCol = i % Math.max(1, Math.ceil(pcmciNodes.length / 3));
+      const spacing = 90 / Math.max(1, Math.ceil(pcmciNodes.length / 3));
       return {
         ...n,
         x: TIME_COLS[colIdx].x,
         y: 25 + rowInCol * spacing + (colIdx === 1 ? 10 : 0),
       };
     });
-    return nodes;
-  }, []);
+  }, [pcmciNodes]);
 
   const posMap = useMemo(() => {
     const m: Record<string, { x: number; y: number }> = {};
     positioned.forEach((n) => { m[n.id] = { x: n.x, y: n.y }; });
     return m;
   }, [positioned]);
+
+  if (pcmciNodes.length === 0) {
+    return (
+      <div className="p-2 h-full flex flex-col items-center justify-center">
+        <span className="font-[family-name:var(--font-michroma)] text-[9px] tracking-wider text-accent-amber mb-1">
+          PCMCI+
+        </span>
+        <span className="text-[8px] text-text-muted font-mono">No temporal nodes</span>
+      </div>
+    );
+  }
 
   return (
     <div className="p-2 h-full flex flex-col">
@@ -44,7 +86,7 @@ export default function PcmciGraph() {
           PCMCI+
         </span>
         <span className="text-[8px] text-text-muted font-mono">
-          {PCMCI_NODES.length} nodes | Temporal
+          {pcmciNodes.length} nodes | Temporal
         </span>
       </div>
       <svg
@@ -82,7 +124,7 @@ export default function PcmciGraph() {
         ))}
 
         {/* Edges */}
-        {PCMCI_EDGES.map((edge) => {
+        {pcmciEdges.map((edge) => {
           const src = posMap[edge.source];
           const tgt = posMap[edge.target];
           if (!src || !tgt) return null;

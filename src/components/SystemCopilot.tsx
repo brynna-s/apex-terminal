@@ -1,20 +1,27 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useApexStore } from "@/stores/useApexStore";
 import {
   processAction,
   processQuery,
   processNodeAnalysis,
+  streamLlmQuery,
   CopilotAction,
 } from "@/lib/copilot-engine";
 import { CopilotMessage } from "@/lib/types";
+import { getModelsForProvider, type LLMProvider } from "@/lib/llm-providers";
 
 const ACTIONS: { label: string; action: CopilotAction; color: string }[] = [
   { label: "DISCOVER STRUCTURE", action: "DISCOVER_STRUCTURE", color: "var(--accent-cyan)" },
   { label: "EXPLAIN REJECTION", action: "EXPLAIN_REJECTION", color: "var(--accent-green)" },
   { label: "VERIFY LOGIC", action: "VERIFY_LOGIC", color: "var(--accent-amber)" },
+];
+
+const PROVIDER_OPTIONS: { value: LLMProvider; label: string }[] = [
+  { value: "gemini", label: "Gemini" },
+  { value: "anthropic", label: "Claude" },
 ];
 
 function getRoleColor(role: CopilotMessage["role"]): string {
@@ -34,16 +41,57 @@ function getRoleLabel(role: CopilotMessage["role"]): string {
 }
 
 export default function SystemCopilot() {
-  const { copilotMessages, addCopilotMessage, graphData, selectedNode } = useApexStore();
+  const {
+    copilotMessages,
+    addCopilotMessage,
+    graphData,
+    selectedNode,
+    severedEdges,
+    shocks,
+    interventionMode,
+    interventionTarget,
+    ablationMode,
+    ablatedNodeIds,
+    ablatedEdgeIds,
+    llmProvider,
+    claudeApiKey,
+    geminiApiKey,
+    claudeModel,
+    geminiModel,
+    isLlmStreaming,
+    setLlmProvider,
+    setClaudeApiKey,
+    setGeminiApiKey,
+    setClaudeModel,
+    setGeminiModel,
+    setIsLlmStreaming,
+  } = useApexStore();
+
+  const activeApiKey = llmProvider === "gemini" ? geminiApiKey : claudeApiKey;
+  const activeModel = llmProvider === "gemini" ? geminiModel : claudeModel;
+  const modelOptions = getModelsForProvider(llmProvider);
+
   const [input, setInput] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+  const [contextBadge, setContextBadge] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastSelectedRef = useRef<string | null>(null);
+  const streamingMsgRef = useRef<string | null>(null);
+  const badgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const isLlmActive = activeApiKey.length > 0;
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [copilotMessages]);
+
+  const flashContextBadge = useCallback((label: string) => {
+    setContextBadge(label);
+    if (badgeTimerRef.current) clearTimeout(badgeTimerRef.current);
+    badgeTimerRef.current = setTimeout(() => setContextBadge(null), 3000);
+  }, []);
 
   // Inject node context message when selection changes
   useEffect(() => {
@@ -53,25 +101,123 @@ export default function SystemCopilot() {
         addCopilotMessage({
           id: `sys-node-${Date.now()}`,
           role: "system",
-          content: `NODE FOCUSED: ${node.label} (\u03A9 ${node.omegaFragility.composite.toFixed(1)}) — ${node.domain} — ${node.globalConcentration} — ${node.replacementTime}`,
+          content: `NODE FOCUSED: ${node.label} (\u03A9 ${node.omegaFragility.composite.toFixed(1)}) \u2014 ${node.domain} \u2014 ${node.globalConcentration} \u2014 ${node.replacementTime}`,
           timestamp: Date.now(),
         });
+        flashContextBadge(`NODE: ${node.shortLabel}`);
       }
     }
     lastSelectedRef.current = selectedNode;
-  }, [selectedNode, graphData.nodes, addCopilotMessage]);
+  }, [selectedNode, graphData.nodes, addCopilotMessage, flashContextBadge]);
+
+  // Flash badge on edge sever
+  useEffect(() => {
+    if (severedEdges.length > 0) {
+      flashContextBadge(`EDGE SEVERED: ${severedEdges[severedEdges.length - 1]}`);
+    }
+  }, [severedEdges, flashContextBadge]);
+
+  const handleStreamingQuery = useCallback(
+    async (userContent: string) => {
+      setIsLlmStreaming(true);
+
+      // Add placeholder assistant message for streaming
+      const assistantId = `llm-${Date.now()}`;
+      streamingMsgRef.current = assistantId;
+      addCopilotMessage({
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        timestamp: Date.now(),
+      });
+
+      try {
+        // Build messages list including the new user message
+        const allMessages = [
+          ...copilotMessages.filter((m) => m.role !== "system"),
+          { id: "temp", role: "user" as const, content: userContent, timestamp: Date.now() },
+        ];
+
+        const stream = await streamLlmQuery({
+          copilotMessages: allMessages,
+          graph: graphData,
+          apiKey: activeApiKey,
+          model: activeModel,
+          provider: llmProvider,
+          selectedNode,
+          severedEdges,
+          shocks,
+          interventionMode,
+          interventionTarget,
+          ablationMode,
+          ablatedNodeIds,
+          ablatedEdgeIds,
+        });
+
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        let accumulated = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          accumulated += decoder.decode(value, { stream: true });
+          // Update the streaming message in store
+          useApexStore.setState((s) => ({
+            copilotMessages: s.copilotMessages.map((m) =>
+              m.id === assistantId ? { ...m, content: accumulated } : m
+            ),
+          }));
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "LLM request failed";
+        useApexStore.setState((s) => ({
+          copilotMessages: s.copilotMessages.map((m) =>
+            m.id === streamingMsgRef.current
+              ? { ...m, content: `[ERROR: ${message}]` }
+              : m
+          ),
+        }));
+      } finally {
+        streamingMsgRef.current = null;
+        setIsLlmStreaming(false);
+      }
+    },
+    [
+      copilotMessages,
+      graphData,
+      activeApiKey,
+      activeModel,
+      llmProvider,
+      selectedNode,
+      severedEdges,
+      shocks,
+      interventionMode,
+      interventionTarget,
+      ablationMode,
+      ablatedNodeIds,
+      ablatedEdgeIds,
+      addCopilotMessage,
+      setIsLlmStreaming,
+    ]
+  );
 
   const handleAction = (action: CopilotAction) => {
+    const userContent = action.replace(/_/g, " ");
     const userMsg: CopilotMessage = {
       id: `user-${Date.now()}`,
       role: "user",
-      content: action.replace(/_/g, " "),
+      content: userContent,
       timestamp: Date.now(),
     };
     addCopilotMessage(userMsg);
 
-    const responses = processAction(action, graphData);
-    responses.forEach((msg) => addCopilotMessage(msg));
+    if (isLlmActive) {
+      handleStreamingQuery(userContent);
+    } else {
+      const responses = processAction(action, graphData);
+      responses.forEach((msg) => addCopilotMessage(msg));
+    }
   };
 
   const handleAnalyzeNode = () => {
@@ -84,12 +230,16 @@ export default function SystemCopilot() {
     };
     addCopilotMessage(userMsg);
 
-    const responses = processNodeAnalysis(selectedNode, graphData);
-    responses.forEach((msg) => addCopilotMessage(msg));
+    if (isLlmActive) {
+      handleStreamingQuery("ANALYZE NODE");
+    } else {
+      const responses = processNodeAnalysis(selectedNode, graphData);
+      responses.forEach((msg) => addCopilotMessage(msg));
+    }
   };
 
   const handleSubmit = () => {
-    if (!input.trim()) return;
+    if (!input.trim() || isLlmStreaming) return;
 
     const userMsg: CopilotMessage = {
       id: `user-${Date.now()}`,
@@ -99,8 +249,12 @@ export default function SystemCopilot() {
     };
     addCopilotMessage(userMsg);
 
-    const responses = processQuery(input, graphData);
-    responses.forEach((msg) => addCopilotMessage(msg));
+    if (isLlmActive) {
+      handleStreamingQuery(input);
+    } else {
+      const responses = processQuery(input, graphData);
+      responses.forEach((msg) => addCopilotMessage(msg));
+    }
 
     setInput("");
   };
@@ -113,12 +267,110 @@ export default function SystemCopilot() {
     <aside className="flex flex-col w-80 border-r border-border bg-surface h-full">
       {/* Header */}
       <div className="px-4 py-3 border-b border-border bg-surface-elevated">
-        <div className="font-[family-name:var(--font-michroma)] text-[10px] tracking-[0.25em] text-accent-cyan">
-          SYSTEM COPILOT
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="font-[family-name:var(--font-michroma)] text-[10px] tracking-[0.25em] text-accent-cyan">
+              SYSTEM COPILOT
+            </div>
+            <div className="text-[9px] text-text-muted font-mono mt-0.5">
+              {isLlmActive
+                ? `${llmProvider === "gemini" ? "Gemini" : "Claude"}-Augmented Analysis`
+                : "Synthetic Scientist Interface"}
+            </div>
+          </div>
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="text-[11px] text-text-muted hover:text-accent-cyan transition-colors p-1"
+            title="LLM Settings"
+          >
+            {showSettings ? "\u2715" : "\u2699"}
+          </button>
         </div>
-        <div className="text-[9px] text-text-muted font-mono mt-0.5">
-          Synthetic Scientist Interface
-        </div>
+
+        {/* Settings panel */}
+        <AnimatePresence>
+          {showSettings && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="overflow-hidden"
+            >
+              <div className="mt-2 pt-2 border-t border-border space-y-1.5">
+                {/* Provider selector */}
+                <div className="flex gap-1">
+                  {PROVIDER_OPTIONS.map((p) => (
+                    <button
+                      key={p.value}
+                      onClick={() => setLlmProvider(p.value)}
+                      className={`flex-1 text-[9px] font-[family-name:var(--font-michroma)] tracking-wider px-2 py-1 rounded border transition-colors ${
+                        llmProvider === p.value
+                          ? "border-accent-cyan/60 text-accent-cyan bg-accent-cyan/10"
+                          : "border-border text-text-muted hover:text-foreground"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                {/* API key input */}
+                <input
+                  type="password"
+                  value={activeApiKey}
+                  onChange={(e) =>
+                    llmProvider === "gemini"
+                      ? setGeminiApiKey(e.target.value)
+                      : setClaudeApiKey(e.target.value)
+                  }
+                  className="w-full bg-surface font-mono text-[10px] text-foreground outline-none px-2 py-1 rounded border border-border placeholder:text-text-muted focus:border-accent-cyan/50 transition-colors"
+                  placeholder={
+                    llmProvider === "gemini"
+                      ? "AIza... (session only, not stored)"
+                      : "sk-ant-... (session only, not stored)"
+                  }
+                  spellCheck={false}
+                />
+                {/* Model selector */}
+                <select
+                  value={activeModel}
+                  onChange={(e) =>
+                    llmProvider === "gemini"
+                      ? setGeminiModel(e.target.value)
+                      : setClaudeModel(e.target.value)
+                  }
+                  className="w-full bg-surface font-mono text-[10px] text-foreground outline-none px-2 py-1 rounded border border-border transition-colors"
+                >
+                  {modelOptions.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                {isLlmActive && (
+                  <div className="text-[8px] text-accent-green font-mono tracking-wider">
+                    {llmProvider.toUpperCase()} ACTIVE
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Context badge */}
+        <AnimatePresence>
+          {contextBadge && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="mt-1.5 text-[8px] font-mono tracking-wider text-accent-amber bg-accent-amber/10 px-2 py-0.5 rounded inline-block"
+            >
+              CONTEXT: {contextBadge}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Messages */}
@@ -147,16 +399,29 @@ export default function SystemCopilot() {
                     [{msg.module}]
                   </span>
                 )}
+                {/* Streaming indicator */}
+                {msg.id === streamingMsgRef.current && isLlmStreaming && (
+                  <span className="text-[8px] text-accent-cyan animate-pulse tracking-wider">
+                    STREAMING...
+                  </span>
+                )}
               </div>
               <div
                 className="whitespace-pre-wrap pl-2 border-l border-border"
                 style={{ color: getRoleColor(msg.role) }}
               >
-                {msg.content}
+                {msg.content || (isLlmStreaming && msg.id === streamingMsgRef.current ? "" : msg.content)}
               </div>
             </motion.div>
           ))}
         </AnimatePresence>
+
+        {/* Thinking indicator */}
+        {isLlmStreaming && copilotMessages[copilotMessages.length - 1]?.content === "" && (
+          <div className="text-[10px] font-mono text-accent-cyan animate-pulse pl-2">
+            APEX is thinking...
+          </div>
+        )}
       </div>
 
       {/* Action Buttons */}
@@ -165,7 +430,8 @@ export default function SystemCopilot() {
           <button
             key={a.action}
             onClick={() => handleAction(a.action)}
-            className="text-[9px] font-[family-name:var(--font-michroma)] tracking-wider px-2.5 py-1.5 rounded border transition-colors"
+            disabled={isLlmStreaming}
+            className="text-[9px] font-[family-name:var(--font-michroma)] tracking-wider px-2.5 py-1.5 rounded border transition-colors disabled:opacity-40"
             style={{
               borderColor: `color-mix(in srgb, ${a.color} 40%, transparent)`,
               color: a.color,
@@ -184,7 +450,8 @@ export default function SystemCopilot() {
         {selectedNodeData && (
           <button
             onClick={handleAnalyzeNode}
-            className="text-[9px] font-[family-name:var(--font-michroma)] tracking-wider px-2.5 py-1.5 rounded border transition-colors border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/10"
+            disabled={isLlmStreaming}
+            className="text-[9px] font-[family-name:var(--font-michroma)] tracking-wider px-2.5 py-1.5 rounded border transition-colors border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/10 disabled:opacity-40"
           >
             ANALYZE NODE
           </button>
@@ -199,13 +466,15 @@ export default function SystemCopilot() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-            className="flex-1 bg-surface-elevated font-mono text-[11px] text-foreground outline-none px-2.5 py-1.5 rounded border border-border placeholder:text-text-muted focus:border-accent-cyan/50 transition-colors"
-            placeholder="Ask the system to analyze or verify..."
+            disabled={isLlmStreaming}
+            className="flex-1 bg-surface-elevated font-mono text-[11px] text-foreground outline-none px-2.5 py-1.5 rounded border border-border placeholder:text-text-muted focus:border-accent-cyan/50 transition-colors disabled:opacity-40"
+            placeholder={isLlmActive ? "Ask anything (LLM active)..." : "Ask the system to analyze or verify..."}
             spellCheck={false}
           />
           <button
             onClick={handleSubmit}
-            className="text-[10px] text-accent-cyan font-mono px-2 py-1.5 hover:bg-accent-cyan/10 rounded transition-colors"
+            disabled={isLlmStreaming}
+            className="text-[10px] text-accent-cyan font-mono px-2 py-1.5 hover:bg-accent-cyan/10 rounded transition-colors disabled:opacity-40"
           >
             &gt;
           </button>

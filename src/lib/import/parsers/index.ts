@@ -1,3 +1,4 @@
+import * as XLSX from "xlsx";
 import { ImportFormat, ParsedGraph } from "../types";
 import { parseCSV } from "./csv-parser";
 import { parseJSON } from "./json-parser";
@@ -11,6 +12,8 @@ const EXTENSION_MAP: Record<string, ImportFormat> = {
   gml: "graphml",
   dot: "dot",
   gv: "dot",
+  xlsx: "xlsx",
+  xls: "xlsx",
 };
 
 export function detectFormat(file: File): ImportFormat | null {
@@ -28,17 +31,142 @@ function detectFormatFromContent(content: string): ImportFormat | null {
   return null;
 }
 
-const PARSER_MAP: Record<ImportFormat, (content: string) => ParsedGraph> = {
+const PARSER_MAP: Record<Exclude<ImportFormat, "xlsx">, (content: string) => ParsedGraph> = {
   csv: parseCSV,
   json: parseJSON,
   graphml: parseGraphML,
   dot: parseDOT,
 };
 
+/**
+ * Extract the largest contiguous table from a sheet.
+ * Dashboard-style xlsx files have title rows, section headers, and multiple
+ * tables with different schemas. This finds the biggest one and returns clean CSV.
+ */
+function extractTableFromSheet(sheet: XLSX.WorkSheet): { csv: string; warnings: string[] } {
+  const warnings: string[] = [];
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    blankrows: true,
+  });
+
+  // Count non-empty cells per row
+  const cellCounts = rows.map((row) => {
+    if (!Array.isArray(row)) return 0;
+    return row.filter((c) => c != null && c !== "").length;
+  });
+
+  // Find contiguous "table regions" — runs of rows with ≥3 non-empty cells
+  const MIN_COLS = 3;
+  const regions: { start: number; end: number; maxCols: number }[] = [];
+  let regionStart = -1;
+  let maxCols = 0;
+
+  for (let i = 0; i < cellCounts.length; i++) {
+    if (cellCounts[i] >= MIN_COLS) {
+      if (regionStart === -1) {
+        regionStart = i;
+        maxCols = cellCounts[i];
+      } else {
+        maxCols = Math.max(maxCols, cellCounts[i]);
+      }
+    } else if (regionStart !== -1) {
+      regions.push({ start: regionStart, end: i, maxCols });
+      regionStart = -1;
+      maxCols = 0;
+    }
+  }
+  if (regionStart !== -1) {
+    regions.push({ start: regionStart, end: cellCounts.length, maxCols });
+  }
+
+  if (regions.length === 0) {
+    return { csv: "", warnings: ["No tabular data found in sheet"] };
+  }
+
+  // Pick the largest region (most rows)
+  const best = regions.reduce((a, b) => (b.end - b.start > a.end - a.start ? b : a));
+
+  if (regions.length > 1) {
+    warnings.push(
+      `Found ${regions.length} table sections; extracted the largest (rows ${best.start + 1}–${best.end}, ${best.end - best.start} rows)`
+    );
+  }
+
+  // Extract rows for the best region
+  const tableRows = rows.slice(best.start, best.end) as unknown[][];
+
+  // Find the leading empty column offset (dashboard sheets often have col A empty)
+  let colOffset = 0;
+  const headerRow = tableRows[0] || [];
+  while (colOffset < headerRow.length && (headerRow[colOffset] == null || headerRow[colOffset] === "")) {
+    colOffset++;
+  }
+
+  // Find the last used column
+  let maxCol = 0;
+  for (const row of tableRows) {
+    if (!Array.isArray(row)) continue;
+    for (let c = row.length - 1; c >= colOffset; c--) {
+      if (row[c] != null && row[c] !== "") {
+        maxCol = Math.max(maxCol, c);
+        break;
+      }
+    }
+  }
+
+  // Build clean CSV from the trimmed region
+  const csvLines = tableRows.map((row) => {
+    const cells: string[] = [];
+    for (let c = colOffset; c <= maxCol; c++) {
+      const val = Array.isArray(row) && c < row.length ? row[c] : "";
+      const str = val == null ? "" : String(val);
+      // Quote fields that contain commas, quotes, or newlines
+      if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+        cells.push('"' + str.replace(/"/g, '""') + '"');
+      } else {
+        cells.push(str);
+      }
+    }
+    return cells.join(",");
+  });
+
+  return { csv: csvLines.join("\n"), warnings };
+}
+
 export async function parseFile(file: File): Promise<ParsedGraph> {
+  // Handle xlsx/xls binary files before reading as text
+  let format = detectFormat(file);
+  if (format === "xlsx") {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheetName = workbook.SheetNames[0];
+    const { csv: csvText, warnings: xlsxWarnings } = extractTableFromSheet(
+      workbook.Sheets[sheetName]
+    );
+
+    if (!csvText) {
+      return {
+        nodes: [],
+        edges: [],
+        format: "xlsx",
+        warnings: xlsxWarnings,
+      };
+    }
+
+    const result = parseCSV(csvText);
+    result.format = "xlsx";
+    result.warnings.unshift(...xlsxWarnings);
+    if (workbook.SheetNames.length > 1) {
+      result.warnings.unshift(
+        `Converted sheet "${sheetName}" (1 of ${workbook.SheetNames.length}). Other sheets were ignored.`
+      );
+    }
+    return result;
+  }
+
   const content = await file.text();
 
-  let format = detectFormat(file);
   if (!format) {
     format = detectFormatFromContent(content);
   }
@@ -48,10 +176,10 @@ export async function parseFile(file: File): Promise<ParsedGraph> {
       edges: [],
       format: "csv",
       warnings: [
-        `Could not detect file format for "${file.name}". Supported: .csv, .json, .graphml, .gml, .dot, .gv`,
+        `Could not detect file format for "${file.name}". Supported: .csv, .json, .graphml, .gml, .dot, .gv, .xlsx, .xls`,
       ],
     };
   }
 
-  return PARSER_MAP[format](content);
+  return PARSER_MAP[format as Exclude<ImportFormat, "xlsx">](content);
 }

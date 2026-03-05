@@ -15,8 +15,25 @@ const MODULE_TABS: { id: ModuleId; label: string; icon: string; color: string }[
 ];
 
 export default function HeaderBar() {
-  const { activeModule, setActiveModule, shocks } = useApexStore();
-  const state = useMemo(() => computeOmegaState(shocks), [shocks]);
+  const { activeModule, setActiveModule, shocks, replayActive, currentEpoch, baselineEpochs, interventionEpochs, activeTimeline } = useApexStore();
+  const baseState = useMemo(() => computeOmegaState(shocks), [shocks]);
+
+  // During replay, override omega state with current epoch's values
+  const replayEpochs = activeTimeline === "baseline" ? baselineEpochs : interventionEpochs;
+  const currentSnapshot = replayActive && replayEpochs.length > 0 ? replayEpochs[currentEpoch] ?? null : null;
+
+  const state = useMemo(() => {
+    if (currentSnapshot) {
+      return {
+        buffer: currentSnapshot.omegaBuffer,
+        shocks,
+        status: currentSnapshot.omegaStatus,
+        lastUpdate: Date.now(),
+      };
+    }
+    return baseState;
+  }, [currentSnapshot, baseState, shocks]);
+
   const doomsday = useMemo(() => computeDoomsdayState(shocks, state.buffer), [shocks, state.buffer]);
   const alertLevel = useMemo(() => computeAlertLevel(state.status, doomsday), [state.status, doomsday]);
 

@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { DCD_NODES, DCD_EDGES, getCategoryColor } from "@/lib/graph-data";
+import { getCategoryColor } from "@/lib/graph-data";
 import { useApexStore } from "@/stores/useApexStore";
+import { CausalNode, CausalEdge } from "@/lib/types";
 
-// Simple 2D force layout positions for the small graph
-function layoutNodes(nodes: typeof DCD_NODES) {
+function layoutNodes(nodes: CausalNode[]) {
   const w = 260;
   const h = 140;
   const cx = w / 2;
@@ -23,14 +23,41 @@ function layoutNodes(nodes: typeof DCD_NODES) {
 }
 
 export default function DcdGraph() {
+  const graphData = useApexStore((s) => s.graphData);
   const selectedNode = useApexStore((s) => s.selectedNode);
   const setSelectedNode = useApexStore((s) => s.setSelectedNode);
-  const positioned = useMemo(() => layoutNodes(DCD_NODES), []);
+
+  const dcdNodes = useMemo(() => {
+    return graphData.nodes.filter(
+      (n) => n.discoverySource === "DCD" || n.discoverySource === "merged"
+    );
+  }, [graphData.nodes]);
+
+  const dcdEdges = useMemo(() => {
+    const nodeIds = new Set(dcdNodes.map((n) => n.id));
+    return graphData.edges.filter(
+      (e) =>
+        e.type === "directed" && nodeIds.has(e.source) && nodeIds.has(e.target)
+    );
+  }, [graphData.edges, dcdNodes]);
+
+  const positioned = useMemo(() => layoutNodes(dcdNodes), [dcdNodes]);
   const posMap = useMemo(() => {
     const m: Record<string, { x: number; y: number }> = {};
     positioned.forEach((n) => { m[n.id] = { x: n.x, y: n.y }; });
     return m;
   }, [positioned]);
+
+  if (dcdNodes.length === 0) {
+    return (
+      <div className="p-2 h-full flex flex-col items-center justify-center">
+        <span className="font-[family-name:var(--font-michroma)] text-[9px] tracking-wider text-accent-cyan mb-1">
+          DCD / NOTEARS
+        </span>
+        <span className="text-[8px] text-text-muted font-mono">No structural nodes</span>
+      </div>
+    );
+  }
 
   return (
     <div className="p-2 h-full flex flex-col">
@@ -39,7 +66,7 @@ export default function DcdGraph() {
           DCD / NOTEARS
         </span>
         <span className="text-[8px] text-text-muted font-mono">
-          {DCD_NODES.length} nodes | Structural
+          {dcdNodes.length} nodes | Structural
         </span>
       </div>
       <svg
@@ -48,7 +75,7 @@ export default function DcdGraph() {
         style={{ minHeight: 0 }}
       >
         {/* Edges */}
-        {DCD_EDGES.map((edge) => {
+        {dcdEdges.map((edge) => {
           const src = posMap[edge.source];
           const tgt = posMap[edge.target];
           if (!src || !tgt) return null;

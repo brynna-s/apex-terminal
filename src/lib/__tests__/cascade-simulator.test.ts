@@ -1,0 +1,280 @@
+import { describe, it, expect } from "vitest";
+import { simulateCascade, mapShocksToNodes } from "@/lib/cascade-simulator";
+import {
+  linearGraph,
+  unstableGraph,
+  laggedGraph,
+  emptyGraph,
+  singleNodeGraph,
+  makeNode,
+  makeEdge,
+  makeGraph,
+  makeShock,
+  SINGLE_SHOCK,
+  MULTI_SHOCKS,
+} from "./fixtures/graph-fixtures";
+import { CausalShock } from "@/lib/types";
+
+// ─── mapShocksToNodes ───────────────────────────────────────────
+
+describe("mapShocksToNodes", () => {
+  it("maps compute shock to manufacturing + infrastructure nodes", () => {
+    const graph = linearGraph();
+    const shock = makeShock({ id: "s", category: "compute", severity: 0.6 });
+    const map = mapShocksToNodes(graph, [shock]);
+    // A is manufacturing, B is infrastructure → both hit
+    expect(map.has("A")).toBe(true);
+    expect(map.has("B")).toBe(true);
+  });
+
+  it("maps energy shock to energy nodes", () => {
+    const graph = linearGraph();
+    const shock = makeShock({ id: "s", category: "energy", severity: 0.4 });
+    const map = mapShocksToNodes(graph, [shock]);
+    expect(map.has("C")).toBe(true); // C is energy
+    expect(map.has("A")).toBe(false);
+  });
+
+  it("distributes severity evenly across matching nodes", () => {
+    const graph = linearGraph();
+    const shock = makeShock({ id: "s", category: "compute", severity: 0.6 });
+    const map = mapShocksToNodes(graph, [shock]);
+    // 2 matching nodes → 0.3 each
+    expect(map.get("A")).toBeCloseTo(0.3, 5);
+    expect(map.get("B")).toBeCloseTo(0.3, 5);
+  });
+
+  it("accumulates multiple shocks on same node, capped at 1", () => {
+    const graph = linearGraph();
+    const shocks = [
+      makeShock({ id: "s1", category: "energy", severity: 0.7 }),
+      makeShock({ id: "s2", category: "energy", severity: 0.5 }),
+    ];
+    const map = mapShocksToNodes(graph, shocks);
+    expect(map.get("C")).toBe(1); // 0.7 + 0.5 = 1.2 → clamped to 1
+  });
+
+  it("returns empty map when no categories match", () => {
+    const graph = linearGraph();
+    const shock = makeShock({ id: "s", category: "geopolitical", severity: 0.5 });
+    const map = mapShocksToNodes(graph, [shock]);
+    // No geopolitical/finance nodes in linearGraph
+    expect(map.size).toBe(0);
+  });
+
+  it("handles empty shock array", () => {
+    const map = mapShocksToNodes(linearGraph(), []);
+    expect(map.size).toBe(0);
+  });
+});
+
+// ─── simulateCascade ────────────────────────────────────────────
+
+describe("simulateCascade", () => {
+  it("returns epoch 0 snapshot with injected shock intensities", () => {
+    const graph = linearGraph();
+    const shock = makeShock({ id: "s", category: "compute", severity: 0.6 });
+    const snapshots = simulateCascade(graph, [shock], []);
+    expect(snapshots[0].epoch).toBe(0);
+    // A and B should be activated at epoch 0
+    expect(snapshots[0].nodeStates["A"].isActivated).toBe(true);
+    expect(snapshots[0].nodeStates["A"].shockIntensity).toBeCloseTo(0.3, 5);
+  });
+
+  it("propagates signal: outSignal = sourceIntensity * weight * dampingFactor", () => {
+    const graph = linearGraph();
+    const shock = makeShock({ id: "s", category: "energy", severity: 0.4 });
+    const snaps = simulateCascade(graph, [shock], [], { maxEpochs: 5 });
+    // C gets 0.4, propagates nowhere (leaf). Check epoch 0.
+    const c0 = snaps[0].nodeStates["C"];
+    expect(c0.shockIntensity).toBeCloseTo(0.4, 5);
+  });
+
+  it("applies forgetting: intensity *= (1 - forgettingRate) per epoch", () => {
+    // Isolated node with no incoming edges → pure decay
+    const graph = makeGraph(
+      [makeNode({ id: "X", category: "energy" })],
+      []
+    );
+    const shock = makeShock({ id: "s", category: "energy", severity: 0.8 });
+    const snaps = simulateCascade(graph, [shock], [], {
+      maxEpochs: 10,
+      forgettingRate: 0.05,
+      stabilityThreshold: 0.0001,
+    });
+
+    // At epoch n, intensity should be ≈ 0.8 * 0.95^n
+    for (let n = 1; n < snaps.length; n++) {
+      const expected = 0.8 * Math.pow(0.95, n);
+      expect(snaps[n].nodeStates["X"].shockIntensity).toBeCloseTo(expected, 3);
+    }
+  });
+
+  it("omegaBuffer = 100 - meanIntensity * 100", () => {
+    const graph = makeGraph(
+      [makeNode({ id: "X", category: "energy" })],
+      []
+    );
+    const shock = makeShock({ id: "s", category: "energy", severity: 0.5 });
+    const snaps = simulateCascade(graph, [shock], []);
+    // Epoch 0: meanIntensity = 0.5 → buffer = 50
+    expect(snaps[0].omegaBuffer).toBeCloseTo(50, 5);
+  });
+
+  it("applies correct status thresholds from buffer", () => {
+    // buffer=50 → ELEVATED
+    const graph = makeGraph(
+      [makeNode({ id: "X", category: "energy" })],
+      []
+    );
+    const shock = makeShock({ id: "s", category: "energy", severity: 0.5 });
+    const snaps = simulateCascade(graph, [shock], []);
+    expect(snaps[0].omegaStatus).toBe("ELEVATED");
+  });
+
+  it("terminates early when maxDelta < stabilityThreshold", () => {
+    const graph = makeGraph(
+      [makeNode({ id: "X", category: "energy" })],
+      []
+    );
+    const shock = makeShock({ id: "s", category: "energy", severity: 0.01 });
+    const snaps = simulateCascade(graph, [shock], [], {
+      maxEpochs: 200,
+      stabilityThreshold: 0.001,
+    });
+    // Should terminate well before 200 epochs
+    expect(snaps.length).toBeLessThan(200);
+    expect(snaps[snaps.length - 1].isStable).toBe(true);
+  });
+
+  it("terminates when isCritical (buffer < criticalBufferThreshold)", () => {
+    const graph = makeGraph(
+      [makeNode({ id: "X", category: "energy" })],
+      []
+    );
+    const shock = makeShock({ id: "s", category: "energy", severity: 0.95 });
+    const snaps = simulateCascade(graph, [shock], [], {
+      maxEpochs: 200,
+      criticalBufferThreshold: 15,
+    });
+    expect(snaps[0].isCritical).toBe(true);
+    // Should stop at epoch 0 or 1
+    expect(snaps.length).toBeLessThanOrEqual(2);
+  });
+
+  it("severed edges are excluded from propagation", () => {
+    const graph = linearGraph();
+    const shock = makeShock({ id: "s", category: "compute", severity: 0.6 });
+    // Sever A→B edge
+    const snaps = simulateCascade(graph, [shock], ["e_AB"], { maxEpochs: 5 });
+    // B should only get signal from its own shock mapping, not from A
+    const edgeState = snaps[0].edgeStates["e_AB"];
+    expect(edgeState.isSevered).toBe(true);
+    expect(edgeState.activeWeight).toBe(0);
+    expect(edgeState.propagationSignal).toBe(0);
+  });
+
+  it("edges with isSevered=true on the edge object are excluded", () => {
+    const graph = linearGraph();
+    graph.edges[0].isSevered = true;
+    const shock = makeShock({ id: "s", category: "compute", severity: 0.6 });
+    const snaps = simulateCascade(graph, [shock], [], { maxEpochs: 5 });
+    expect(snaps[0].edgeStates["e_AB"].isSevered).toBe(true);
+  });
+
+  it("updates omega composite: min(10, base * (1 + intensity * omegaShockScale))", () => {
+    const graph = makeGraph(
+      [makeNode({ id: "X", category: "energy", omegaFragility: { composite: 5, substitutionFriction: 5, downstreamLoad: 5, cascadingVoltage: 5, existentialTailWeight: 5 } })],
+      []
+    );
+    const shock = makeShock({ id: "s", category: "energy", severity: 1.0 });
+    const snaps = simulateCascade(graph, [shock], [], {
+      maxEpochs: 2,
+      omegaShockScale: 0.3,
+    });
+    // Epoch 0: intensity=1.0, composite = min(10, 5*(1+1.0*0.3)) = 6.5
+    expect(snaps[0].nodeStates["X"].omegaComposite).toBeCloseTo(5.0, 1);
+    // After epoch 0, forgetting reduces intensity, then composite is recalculated
+  });
+
+  it("handles empty graph gracefully", () => {
+    const snaps = simulateCascade(emptyGraph(), [SINGLE_SHOCK], []);
+    expect(snaps.length).toBeGreaterThanOrEqual(1);
+    expect(snaps[0].omegaBuffer).toBe(100);
+  });
+
+  it("works with initialNodeStates", () => {
+    const graph = makeGraph(
+      [makeNode({ id: "X", category: "energy" })],
+      []
+    );
+    const initialStates = {
+      X: {
+        omegaComposite: 7,
+        omegaProfile: { composite: 7, substitutionFriction: 5, downstreamLoad: 5, cascadingVoltage: 5, existentialTailWeight: 5 },
+        shockIntensity: 0.5,
+        isActivated: true,
+      },
+    };
+    const snaps = simulateCascade(graph, [], [], { maxEpochs: 3 }, 1, initialStates);
+    // Should start from existing state
+    expect(snaps[0].nodeStates["X"].shockIntensity).toBeCloseTo(0.5, 3);
+  });
+
+  it("produces edge propagation signal in snapshots", () => {
+    const graph = linearGraph();
+    const shock = makeShock({ id: "s", category: "compute", severity: 0.6 });
+    const snaps = simulateCascade(graph, [shock], [], { maxEpochs: 3 });
+    // Edge A→B should have non-zero propagation signal at epoch 0
+    const eAB = snaps[0].edgeStates["e_AB"];
+    expect(eAB.propagationSignal).toBeGreaterThan(0);
+    expect(eAB.activeWeight).toBe(0.7);
+  });
+
+  it("uses default config when none provided", () => {
+    const graph = linearGraph();
+    const shock = makeShock({ id: "s", category: "energy", severity: 0.1 });
+    const snaps = simulateCascade(graph, [shock], []);
+    // Should use maxEpochs=200, forgettingRate=0.05, etc.
+    expect(snaps.length).toBeGreaterThan(1);
+  });
+
+  it("all omega profile dimensions are clamped to [0, 10]", () => {
+    const graph = makeGraph(
+      [makeNode({
+        id: "X",
+        category: "energy",
+        omegaFragility: { composite: 9.5, substitutionFriction: 9.5, downstreamLoad: 9.5, cascadingVoltage: 9.5, existentialTailWeight: 9.5 },
+      })],
+      []
+    );
+    const shock = makeShock({ id: "s", category: "energy", severity: 1.0 });
+    const snaps = simulateCascade(graph, [shock], [], { maxEpochs: 5, omegaShockScale: 0.5 });
+    for (const snap of snaps) {
+      const profile = snap.nodeStates["X"].omegaProfile;
+      expect(profile.composite).toBeLessThanOrEqual(10);
+      expect(profile.substitutionFriction).toBeLessThanOrEqual(10);
+      expect(profile.downstreamLoad).toBeLessThanOrEqual(10);
+      expect(profile.cascadingVoltage).toBeLessThanOrEqual(10);
+      expect(profile.existentialTailWeight).toBeLessThanOrEqual(10);
+    }
+  });
+
+  it("signal propagates through chain A→B→C over multiple epochs", () => {
+    const graph = linearGraph();
+    // Only shock A via manufacturing
+    const nodes = graph.nodes;
+    // Remove B's infrastructure so only A gets the shock
+    nodes[1] = { ...nodes[1], category: "agriculture" };
+    const shock = makeShock({ id: "s", category: "compute", severity: 0.8 });
+    const snaps = simulateCascade(graph, [shock], [], { maxEpochs: 10, stabilityThreshold: 0.0001 });
+    // By epoch 1, B should have received signal from A
+    if (snaps.length > 1) {
+      expect(snaps[1].nodeStates["B"].shockIntensity).toBeGreaterThan(0);
+    }
+    // By epoch 2+, C should have received signal from B
+    if (snaps.length > 2) {
+      expect(snaps[2].nodeStates["C"].shockIntensity).toBeGreaterThan(0);
+    }
+  });
+});

@@ -1,4 +1,5 @@
 import { CopilotMessage, ModuleId, CausalGraph } from "./types";
+import { serializeGraphContext } from "./copilot-context";
 
 let msgCounter = 0;
 
@@ -212,4 +213,68 @@ export function processQuery(
         `Use the action buttons below for structured analysis, or ask about risk propagation, counterfactuals, or shock scenarios.`
     ),
   ];
+}
+
+// ─── LLM Streaming ──────────────────────────────────────────────
+
+interface StreamLlmOptions {
+  copilotMessages: CopilotMessage[];
+  graph: CausalGraph;
+  apiKey: string;
+  model: string;
+  provider?: "anthropic" | "gemini";
+  selectedNode: string | null;
+  severedEdges: string[];
+  shocks: { id: string; name: string; severity: number; category: string }[];
+  interventionMode: boolean;
+  interventionTarget: string | null;
+  ablationMode?: boolean;
+  ablatedNodeIds?: string[];
+  ablatedEdgeIds?: string[];
+}
+
+export async function streamLlmQuery(
+  opts: StreamLlmOptions
+): Promise<ReadableStream<Uint8Array>> {
+  const systemContext = serializeGraphContext(opts.graph, {
+    selectedNode: opts.selectedNode,
+    severedEdges: opts.severedEdges,
+    shocks: opts.shocks,
+    interventionMode: opts.interventionMode,
+    interventionTarget: opts.interventionTarget,
+    ablationMode: opts.ablationMode,
+    ablatedNodeIds: opts.ablatedNodeIds,
+    ablatedEdgeIds: opts.ablatedEdgeIds,
+  });
+
+  // Convert copilot messages to Claude messages format (skip system messages)
+  const messages = opts.copilotMessages
+    .filter((m) => m.role !== "system")
+    .map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    }));
+
+  const res = await fetch("/api/copilot", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages,
+      systemContext,
+      apiKey: opts.apiKey,
+      model: opts.model,
+      provider: opts.provider,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Request failed" }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+
+  if (!res.body) {
+    throw new Error("No response body");
+  }
+
+  return res.body;
 }

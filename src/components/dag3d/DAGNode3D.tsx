@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
 import * as THREE from "three";
-import { CausalNode } from "@/lib/types";
+import { CausalNode, NodeEpochState } from "@/lib/types";
 import { getCategoryColor, getDomainColor } from "@/lib/graph-data";
 
 interface DAGNode3DProps {
@@ -17,6 +17,9 @@ interface DAGNode3DProps {
   anyNodeSelected: boolean;
   isConsequence?: boolean;
   isGreyedOut?: boolean;
+  isAblated?: boolean;
+  ablationMode?: boolean;
+  epochState?: NodeEpochState;
   onClick?: () => void;
   onDoubleClick?: () => void;
 }
@@ -44,23 +47,28 @@ export default function DAGNode3D({
   anyNodeSelected,
   isConsequence = false,
   isGreyedOut = false,
+  isAblated = false,
+  ablationMode = false,
+  epochState,
   onClick,
   onDoubleClick,
 }: DAGNode3DProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const selectionRingRef = useRef<THREE.Mesh>(null);
   const birthProgress = useRef(isConsequence ? 0 : 1);
+  const displayOmega = useRef(node.omegaFragility.composite);
   const [hovered, setHovered] = useState(false);
   const baseColor = getCategoryColor(node.category);
   const color = isGreyedOut ? "#3a3d50" : isConsequence ? "#ff6d00" : baseColor;
-  const composite = node.omegaFragility.composite;
+  const composite = epochState ? epochState.omegaComposite : node.omegaFragility.composite;
   const t = composite / 10;
   const size = 0.5 + Math.pow(t, 2.2) * 4.5; // range 0.5–5.0, power curve
   const glowColor = isConsequence ? "#ff6d00" : getOmegaGlowColor(composite);
+  const shockGlow = epochState ? epochState.shockIntensity : 0;
 
   // Compute opacity based on selection state
   const dimmed = anyNodeSelected && !isSelected && !isNeighborOfSelected;
-  const nodeOpacity = isGreyedOut ? 0.08 : dimmed ? 0.2 : 0.9;
+  const nodeOpacity = isAblated ? 0.15 : isGreyedOut ? 0.08 : dimmed ? 0.2 : 0.9;
 
   useFrame((_, delta) => {
     // Birth animation for consequence nodes
@@ -68,11 +76,15 @@ export default function DAGNode3D({
       birthProgress.current = Math.min(1, birthProgress.current + delta * 2); // ~500ms
     }
 
+    // Smooth interpolation toward epoch target
+    const targetOmega = epochState ? epochState.omegaComposite : node.omegaFragility.composite;
+    displayOmega.current += (targetOmega - displayOmega.current) * 0.15;
+
     if (meshRef.current) {
       const birth = birthProgress.current;
       const baseScale = (isSelected ? 1.15 : 1) * birth;
-      const pulseIntensity = isConsequence ? 0.08 : 0.03;
-      const pulseSpeed = isConsequence ? 0.005 : 0.002;
+      const pulseIntensity = isConsequence ? 0.08 : (0.03 + shockGlow * 0.12);
+      const pulseSpeed = isConsequence ? 0.005 : (0.002 + shockGlow * 0.003);
       const pulse = Math.sin(Date.now() * pulseSpeed * (1 + composite / 10)) * pulseIntensity;
       meshRef.current.scale.setScalar(baseScale + pulse);
     }
@@ -100,6 +112,19 @@ export default function DAGNode3D({
             color="#00e5ff"
             transparent
             opacity={0.4}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+
+      {/* Ablation ring (magenta) */}
+      {isAblated && (
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[size * 1.8, size * 2.2, 32]} />
+          <meshBasicMaterial
+            color="#e040fb"
+            transparent
+            opacity={0.6}
             side={THREE.DoubleSide}
           />
         </mesh>
@@ -136,7 +161,7 @@ export default function DAGNode3D({
         <meshStandardMaterial
           color={color}
           emissive={isGreyedOut ? "#1a1a2e" : isSelected ? "#00e5ff" : color}
-          emissiveIntensity={isGreyedOut ? 0.02 : isSelected ? 1.0 : hovered ? 0.8 : 0.4 + (composite / 10) * 0.3}
+          emissiveIntensity={isGreyedOut ? 0.02 : isSelected ? 1.0 : hovered ? 0.8 : (0.4 + (composite / 10) * 0.3 + shockGlow * 0.6)}
           transparent
           opacity={nodeOpacity}
         />

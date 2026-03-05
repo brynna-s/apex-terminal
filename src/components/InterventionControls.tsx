@@ -170,7 +170,7 @@ export default function InterventionControls() {
           {/* Scissors Tool */}
           <div className="mt-3 pt-3 border-t border-border space-y-2">
             <div className="font-[family-name:var(--font-michroma)] text-[9px] tracking-wider text-text-muted">
-              SCISSORS TOOL
+              CAUSAL LINK BREAK
             </div>
             <button
               onClick={() => setScissorsMode(!scissorsMode)}
@@ -181,7 +181,7 @@ export default function InterventionControls() {
                 backgroundColor: scissorsMode ? "rgba(255,23,68,0.08)" : "transparent",
               }}
             >
-              {scissorsMode ? "\u2702 SCISSORS ACTIVE" : "\u2702 ENABLE SCISSORS"}
+              {scissorsMode ? "\uD83D\uDD17 LINK BREAK ACTIVE" : "\uD83D\uDD17 BREAK LINKS"}
             </button>
             {scissorsMode && (
               <div className="text-[8px] font-mono text-accent-red/80 p-2 border border-accent-red/20 rounded bg-accent-red/5">

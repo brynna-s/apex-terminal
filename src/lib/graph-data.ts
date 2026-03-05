@@ -476,6 +476,20 @@ export const MAIN_GRAPH: CausalGraph = {
   metadata: METADATA,
 };
 
+export const EMPTY_GRAPH: CausalGraph = {
+  nodes: [],
+  edges: [],
+  metadata: {
+    density: 0,
+    constraintType: "none",
+    verificationStatus: "UNVERIFIED",
+    totalNodes: 0,
+    totalEdges: 0,
+    inconsistentEdges: 0,
+    restrictedNodes: 0,
+  },
+};
+
 // ─── DCD Sub-Graph (for Trinity Panel) ───────────────────────────
 export const DCD_NODES: CausalNode[] = NODES.filter(
   (n) => n.discoverySource === "DCD" || n.discoverySource === "merged"

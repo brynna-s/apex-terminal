@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { FCI_NODES, FCI_EDGES, getCategoryColor } from "@/lib/graph-data";
+import { getCategoryColor } from "@/lib/graph-data";
 import { useApexStore } from "@/stores/useApexStore";
+import { CausalNode } from "@/lib/types";
 
-function layoutNodes(nodes: typeof FCI_NODES) {
+function layoutNodes(nodes: CausalNode[]) {
   const w = 260;
   const h = 120;
   const cx = w / 2;
@@ -22,18 +23,46 @@ function layoutNodes(nodes: typeof FCI_NODES) {
 }
 
 export default function FciGraph() {
+  const graphData = useApexStore((s) => s.graphData);
   const selectedNode = useApexStore((s) => s.selectedNode);
   const setSelectedNode = useApexStore((s) => s.setSelectedNode);
-  const positioned = useMemo(() => layoutNodes(FCI_NODES), []);
+
+  const fciNodes = useMemo(() => {
+    return graphData.nodes.filter(
+      (n) => n.isConfounded || n.discoverySource === "FCI"
+    );
+  }, [graphData.nodes]);
+
+  const fciEdges = useMemo(() => {
+    const nodeIds = new Set(fciNodes.map((n) => n.id));
+    return graphData.edges.filter(
+      (e) =>
+        e.type === "confounded" ||
+        (nodeIds.has(e.source) && nodeIds.has(e.target))
+    );
+  }, [graphData.edges, fciNodes]);
+
+  const positioned = useMemo(() => layoutNodes(fciNodes), [fciNodes]);
   const posMap = useMemo(() => {
     const m: Record<string, { x: number; y: number }> = {};
     positioned.forEach((n) => { m[n.id] = { x: n.x, y: n.y }; });
     return m;
   }, [positioned]);
 
-  const uncertainCount = FCI_EDGES.filter(
+  const uncertainCount = fciEdges.filter(
     (e) => e.type === "confounded"
   ).length;
+
+  if (fciNodes.length === 0) {
+    return (
+      <div className="p-2 h-full flex flex-col items-center justify-center">
+        <span className="font-[family-name:var(--font-michroma)] text-[9px] tracking-wider text-accent-red mb-1">
+          FCI
+        </span>
+        <span className="text-[8px] text-text-muted font-mono">No confounded nodes</span>
+      </div>
+    );
+  }
 
   return (
     <div className="p-2 h-full flex flex-col">
@@ -42,7 +71,7 @@ export default function FciGraph() {
           FCI
         </span>
         <span className="text-[8px] text-text-muted font-mono">
-          {FCI_NODES.length} nodes | Latent PAG
+          {fciNodes.length} nodes | Latent PAG
         </span>
       </div>
       <svg
@@ -51,7 +80,7 @@ export default function FciGraph() {
         style={{ minHeight: 0 }}
       >
         {/* Edges */}
-        {FCI_EDGES.map((edge) => {
+        {fciEdges.map((edge) => {
           const src = posMap[edge.source];
           const tgt = posMap[edge.target];
           if (!src || !tgt) return null;

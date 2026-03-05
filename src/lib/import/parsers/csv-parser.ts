@@ -45,17 +45,59 @@ const HEADER_MAP: Record<string, string> = {
   id: "id",
   node_id: "id",
   nodeid: "id",
+  risk_id: "id",
+  edge_id: "id",
+  flow_id: "id",
+  link_id: "id",
+  record_id: "id",
   label: "label",
   name: "label",
+  entity_name: "label",
+  node_name: "label",
+  title: "label",
+  description: "label",
+  company: "label",
+  firm: "label",
+  supplier: "label",
+  manufacturer: "label",
+  entity: "label",
+  organization: "label",
+  supply_chain_stage: "label",
+  process: "label",
+  material: "label",
+  component: "label",
   short_label: "shortLabel",
   shortlabel: "shortLabel",
   category: "category",
   type: "type",
+  role: "category",
+  group: "category",
+  class: "category",
+  kind: "category",
+  activity: "category",
+  sector: "category",
+  tier: "category",
+  stage: "category",
   domain: "domain",
+  country: "domain",
+  region: "domain",
+  location: "domain",
+  city: "domain",
   source: "source",
   from: "source",
+  origin: "source",
+  origin_node: "source",
+  src: "source",
+  src_node: "source",
+  from_node: "source",
   target: "target",
   to: "target",
+  destination: "target",
+  destination_node: "target",
+  dest: "target",
+  dest_node: "target",
+  dst: "target",
+  to_node: "target",
   weight: "weight",
   lag: "lag",
   confidence: "confidence",
@@ -70,7 +112,18 @@ const HEADER_MAP: Record<string, string> = {
   existential_tail_weight: "existentialTailWeight",
   global_concentration: "globalConcentration",
   replacement_time: "replacementTime",
+  capacity: "physicalConstraint",
+  notes: "physicalConstraint",
+  key_non_china_alternatives: "physicalConstraint",
+  alternatives: "physicalConstraint",
   physical_constraint: "physicalConstraint",
+  china_share: "globalConcentration",
+  "china_share_%": "globalConcentration",
+  concentration: "globalConcentration",
+  weighted_exposure: "globalConcentration",
+  risk_weight: "weight",
+  trend: "replacementTime",
+  "non_china_capacity_%": "replacementTime",
   physical_mechanism: "physicalMechanism",
   is_confounded: "isConfounded",
   is_restricted: "isRestricted",
@@ -97,8 +150,39 @@ export function parseCSV(content: string): ParsedGraph {
     return HEADER_MAP[normalized] ?? normalized;
   });
 
+  // Heuristic fallback: for key fields still missing, scan unmapped columns
+  const heuristicRules: {
+    canonical: string;
+    patterns: RegExp[];
+  }[] = [
+    { canonical: "id", patterns: [/_id$/] },
+    { canonical: "label", patterns: [/(^|_)(name|label|title|description)(_|$)/] },
+    { canonical: "source", patterns: [/(^|_)(origin|src|from|source)(_|$)/] },
+    { canonical: "target", patterns: [/(^|_)(dest|dst|to|target|destination)(_|$)/] },
+    { canonical: "category", patterns: [/(^|_)(category|type|role|class|kind|group)(_|$)/] },
+  ];
+
+  for (const rule of heuristicRules) {
+    if (headers.includes(rule.canonical)) continue; // already resolved
+    for (let i = 0; i < headers.length; i++) {
+      const normalized = rawHeaders[i].toLowerCase().replace(/[\s-]+/g, "_");
+      // Skip columns already mapped by HEADER_MAP
+      if (normalized in HEADER_MAP) continue;
+      if (rule.patterns.some((p) => p.test(normalized))) {
+        warnings.push(
+          `Heuristic: mapped column "${rawHeaders[i]}" → ${rule.canonical}`
+        );
+        headers[i] = rule.canonical;
+        break; // first match wins
+      }
+    }
+  }
+
   const unmapped = rawHeaders.filter(
-    (h) => !(h.toLowerCase().replace(/[\s-]+/g, "_") in HEADER_MAP)
+    (h, i) => {
+      const normalized = h.toLowerCase().replace(/[\s-]+/g, "_");
+      return !(normalized in HEADER_MAP) && headers[i] === normalized;
+    }
   );
   if (unmapped.length > 0) {
     warnings.push(`Unmapped columns (kept as-is): ${unmapped.join(", ")}`);

@@ -8,6 +8,7 @@ import { validateParsedGraph } from "@/lib/import/validation";
 import { mergeGraphs } from "@/lib/import/merge";
 import {
   ImportStep,
+  ParsedGraph,
   ValidationResult,
   MergeResult,
 } from "@/lib/import/types";
@@ -51,30 +52,161 @@ export default function ImportModal() {
   }, [open, setOpen]);
 
   const handleFileSelected = useCallback(
-    async (file: File) => {
-      setFileName(file.name);
+    async (files: File[]) => {
+      if (files.length === 0) return;
+
+      setFileName(
+        files.length === 1 ? files[0].name : `${files.length} files selected`
+      );
       setParseError(null);
 
-      try {
-        const parsed = await parseFile(file);
+      const allNodes: ParsedGraph["nodes"] = [];
+      const allEdges: ParsedGraph["edges"] = [];
+      const allWarnings: string[] = [];
+      const errors: string[] = [];
 
-        if (
-          parsed.nodes.length === 0 &&
-          parsed.edges.length === 0 &&
-          parsed.warnings.length > 0
-        ) {
-          setParseError(parsed.warnings.join(". "));
-          return;
+      for (const file of files) {
+        try {
+          const parsed = await parseFile(file);
+          allNodes.push(...parsed.nodes);
+          allEdges.push(...parsed.edges);
+          allWarnings.push(...parsed.warnings);
+        } catch (err) {
+          errors.push(
+            `${file.name}: ${err instanceof Error ? err.message : "unknown error"}`
+          );
+        }
+      }
+
+      if (allNodes.length === 0 && allEdges.length === 0) {
+        setParseError(
+          errors.length > 0
+            ? errors.join("\n")
+            : allWarnings.join(". ")
+        );
+        return;
+      }
+
+      if (errors.length > 0) {
+        allWarnings.unshift(...errors.map((e) => `Parse error — ${e}`));
+      }
+
+      // ── Cross-file edge name resolution ──
+      // Edges may reference node labels (e.g. "JL MAG") instead of IDs (e.g. "N003").
+      // Build a lookup and rewrite edge source/target to matching node IDs.
+      if (allNodes.length > 0 && allEdges.length > 0) {
+        const nodesByLabel = new Map<string, { id: string; label: string }>();
+        for (const node of allNodes) {
+          if (node.id && node.label) {
+            const key = String(node.label).toLowerCase();
+            // Only store the first node per label (exact key)
+            if (!nodesByLabel.has(key)) {
+              nodesByLabel.set(key, {
+                id: String(node.id),
+                label: String(node.label),
+              });
+            }
+          }
         }
 
-        const result = validateParsedGraph(parsed, graphData);
-        setValidationResult(result);
-        setStep("preview");
-      } catch (err) {
-        setParseError(
-          `Failed to parse file: ${err instanceof Error ? err.message : "unknown error"}`
-        );
+        const nodeIds = new Set(allNodes.map((n) => String(n.id ?? "")));
+        let resolvedCount = 0;
+
+        const resolveRef = (
+          ref: string
+        ): { id: string; label: string } | null => {
+          // Already a valid node ID — skip
+          if (nodeIds.has(ref)) return null;
+
+          const refLower = ref.toLowerCase();
+
+          // 1. Exact label match
+          const exact = nodesByLabel.get(refLower);
+          if (exact) return exact;
+
+          // 2. Substring match — find shortest label containing the ref
+          let bestMatch: { id: string; label: string } | null = null;
+          for (const entry of nodesByLabel.values()) {
+            const labelLower = entry.label.toLowerCase();
+            if (
+              labelLower.includes(refLower) ||
+              refLower.includes(labelLower)
+            ) {
+              if (
+                !bestMatch ||
+                entry.label.length < bestMatch.label.length
+              ) {
+                bestMatch = entry;
+              }
+            }
+          }
+          return bestMatch;
+        };
+
+        for (const edge of allEdges) {
+          if (edge.source) {
+            const match = resolveRef(String(edge.source));
+            if (match) {
+              allWarnings.push(
+                `Edge resolution: "${edge.source}" → node ${match.id} ("${match.label}")`
+              );
+              edge.source = match.id;
+              resolvedCount++;
+            }
+          }
+          if (edge.target) {
+            const match = resolveRef(String(edge.target));
+            if (match) {
+              allWarnings.push(
+                `Edge resolution: "${edge.target}" → node ${match.id} ("${match.label}")`
+              );
+              edge.target = match.id;
+              resolvedCount++;
+            }
+          }
+        }
+
+        if (resolvedCount > 0) {
+          allWarnings.unshift(
+            `Resolved ${resolvedCount} edge reference(s) by matching node labels`
+          );
+        }
       }
+
+      // ── Auto-create stub nodes for unresolved edge references ──
+      // When edges reference source/target names with no matching node,
+      // generate placeholder nodes so validation doesn't block the import.
+      if (allEdges.length > 0) {
+        const existingNodeIds = new Set(allNodes.map((n) => String(n.id ?? "")));
+        const stubbed = new Set<string>();
+
+        for (const edge of allEdges) {
+          for (const ref of [edge.source, edge.target]) {
+            if (!ref) continue;
+            const refStr = String(ref);
+            if (existingNodeIds.has(refStr) || stubbed.has(refStr)) continue;
+            allNodes.push({ id: refStr, label: refStr });
+            stubbed.add(refStr);
+          }
+        }
+
+        if (stubbed.size > 0) {
+          allWarnings.push(
+            `Auto-created ${stubbed.size} stub node(s) from edge references: ${[...stubbed].join(", ")}`
+          );
+        }
+      }
+
+      const combined: ParsedGraph = {
+        nodes: allNodes,
+        edges: allEdges,
+        format: "json", // mixed formats; irrelevant after parsing
+        warnings: allWarnings,
+      };
+
+      const result = validateParsedGraph(combined, graphData);
+      setValidationResult(result);
+      setStep("preview");
     },
     [graphData]
   );
